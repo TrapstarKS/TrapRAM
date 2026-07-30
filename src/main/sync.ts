@@ -136,9 +136,9 @@ export async function run(vault: Vault): Promise<SyncResult> {
     let result: SyncResult = { added: 0, updated: 0, cookies: 0, removed: 0, pushed: false, pulled: false }
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      const local = payloadOf(vault.read())
       const remote = await pull(endpoint, enc)
 
+      const local = payloadOf(vault.read())
       if (!remote) {
         await push(endpoint, enc, local, 0)
         result = { ...result, pushed: true }
