@@ -1,18 +1,27 @@
+This one is all repair work. No new features — a review turned up a set of bugs that only show themselves when two things happen at the same time, which is exactly when they are hardest to notice.
+
 ### Fixed
 
-- The CPU column on Windows showed impossible numbers like 300%. It was counting total processor seconds instead of a rate, so it only ever grew.
-- Roblox clients that sit in the Windows tray with no game running are closed automatically instead of piling up.
-- Multi-client refused to turn on while an invisible tray client held the lock, and told you to close windows that were not there.
-- Windows updates ran the full setup wizard. They now install silently and reopen on the new version.
-- macOS updates downloaded and then never installed, and the Restart button did nothing.
-- The update banner vanished when a background check ran while an update was already downloaded, then offered to download it again.
-- Browse servers opened without the game you had selected.
-- Quick launch forgot your last game every time you closed the app.
+- TrapRAM could close itself while sitting in the background. Two saves landing at the same moment made one of them fail, and nothing was catching that failure.
+- Launching two accounts in quick succession could mix their client profiles together, so one account's client ended up carrying another account's data. Launches now run one at a time.
+- On macOS, two quick launches could claim the same client slot and leave a half-built copy of Roblox behind.
+- A stalled connection left a launch hanging for five minutes with nothing on screen. Requests now give up after 20 seconds and tell you.
+- Copying a cookie and then removing that account, or locking the vault, closed the app 45 seconds later.
+- Syncing could quietly undo an edit made while the sync was still running.
+- Buttons stayed clickable while they were still working, so a double click could unlock, save or add something twice.
+- Dragging an account while a search or group filter was on rewrote the order of the accounts you could not see. Dragging now only applies to manual ordering, and an account lands exactly where you drop it.
+- The dismiss button on a failed update notice did nothing.
+- The address bar in the built-in browser reset itself while you were typing in it.
+- After locking the vault, the unlock screen asked for a password even on keychain vaults.
+- Settings still claimed the vault was protected by the keychain after you switched it to a master password.
+- An interrupted profile swap could leave the wrong account's files saved under another account.
 
-### New
+### Safer
 
-- Running clients shows which account each open client belongs to.
+- A page in the built-in browser can no longer hand anything but an http or https link to the operating system. Other protocols are how a web page reaches system tools it has no business touching.
+- Redirects that leave the allowed sites are now stopped the same way a direct click is.
+- The sync relay refuses any write that does not say which version it is replacing.
 
-### Installing this one
+### Quieter
 
-macOS auto-update works from this version onward, so this is the last time it has to be installed by hand.
+- Avatars are only fetched when they are missing or when you ask for a refresh, and the vault is only rewritten when something actually changed. Both cut most of the background disk and network work.
