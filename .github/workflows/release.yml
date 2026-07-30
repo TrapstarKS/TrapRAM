@@ -82,8 +82,8 @@ jobs:
             found=1
             echo "== $app"
             codesign --verify --strict --verbose=1 "$app" || status=1
-            requirement=$(codesign -d -r- "$app" 2>&1 | sed -n 's/^# designated => //p')
-            echo "   $requirement"
+            requirement=$(codesign -d -r- "$app" 2>&1 | sed -n 's/^#* *designated => *//p' | tr 'A-F' 'a-f')
+            echo "   ${requirement:-<no designated requirement>}"
             case "$requirement" in
               *"certificate leaf = H\"$FINGERPRINT\""*) ;;
               *)
