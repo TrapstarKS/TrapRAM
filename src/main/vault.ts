@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import fs from 'node:fs/promises'
 import type { Account, GroupMeta, Preset, PrivateServer, VaultStatus } from '@shared/types'
 import { seal, open } from '@shared/pure'
+import { writeAtomic } from '@shared/atomic'
 
 const scryptAsync = promisify(scrypt) as (
   pw: Buffer,
@@ -41,12 +42,6 @@ const empty = (): VaultData => ({
   servers: [],
   tombstones: {}
 })
-
-async function writeAtomic(path: string, data: Buffer | string): Promise<void> {
-  const tmp = `${path}.${process.pid}.tmp`
-  await fs.writeFile(tmp, data, { mode: 0o600 })
-  await fs.rename(tmp, path)
-}
 
 export class Vault {
   private dir = app.getPath('userData')

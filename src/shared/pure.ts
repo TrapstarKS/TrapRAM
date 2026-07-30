@@ -253,6 +253,25 @@ export function fingerprint(p: SyncPayload): string {
   )
 }
 
+export function realPids(pids: unknown): number[] {
+  if (!Array.isArray(pids)) return []
+  return [...new Set(pids.map(Number).filter((n) => Number.isSafeInteger(n) && n > 0))]
+}
+
+export type Gate = <T>(fn: () => Promise<T>) => Promise<T>
+
+export function gate(): Gate {
+  let chain: Promise<unknown> = Promise.resolve()
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    const next = chain.then(fn, fn)
+    chain = next.then(
+      () => undefined,
+      () => undefined
+    )
+    return next
+  }
+}
+
 export interface Cell {
   x: number
   y: number
