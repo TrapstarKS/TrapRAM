@@ -1,7 +1,7 @@
 {
   "name": "trapram",
   "productName": "TrapRAM",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Roblox account manager",
   "main": "out/main/index.js",
   "author": "TrapstarKS",
