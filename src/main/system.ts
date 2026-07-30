@@ -86,7 +86,7 @@ export async function processes(): Promise<RobloxProcess[]> {
     return fillOwners(
       list.map((p) => {
         const cmd = p.cmd ?? ''
-        const tracker = /-b\s+(\d+)/.exec(cmd)
+        const tracker = /(?:-b\s+|browsertrackerid:)(\d+)/i.exec(cmd)
         return {
           pid: p.pid,
           memoryMb: Math.round(p.mem / 1048576),
