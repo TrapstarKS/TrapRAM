@@ -9,6 +9,7 @@ import {
   TimerReset,
   Info
 } from 'lucide-react'
+import type { VaultStatus } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { Button, Input, Label, Section, Segmented, Switch, Modal } from './ui'
@@ -279,13 +280,17 @@ export default function SettingsPanel() {
               variant="primary"
               disabled={next.length < 8}
               onClick={() =>
-                void run('Updating password', () => api.call('vault:changePassword', cur, next), 'Password updated').then(
-                  () => {
-                    setPwOpen(false)
-                    setCur('')
-                    setNext('')
-                  }
-                )
+                void run(
+                  'Updating password',
+                  () => api.call<VaultStatus>('vault:changePassword', cur, next),
+                  'Password updated'
+                ).then((status) => {
+                  if (!status) return
+                  useStore.setState({ vault: status })
+                  setPwOpen(false)
+                  setCur('')
+                  setNext('')
+                })
               }
             >
               Save

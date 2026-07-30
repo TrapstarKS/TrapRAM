@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowLeft, ArrowRight, RotateCw, X, House, ExternalLink, Puzzle, Code2 } from 'lucide-react'
 import './index.css'
@@ -15,7 +15,7 @@ declare global {
   interface Window {
     browser: {
       send(userId: number, action: string, arg?: string): void
-      onState(fn: (s: State) => void): void
+      onState(fn: (s: State) => void): () => void
     }
   }
 }
@@ -30,13 +30,17 @@ function Toolbar() {
   const [state, setState] = useState<State>({ url: '', title: '', canGoBack: false, canGoForward: false, loading: false })
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState(false)
+  const editingRef = useRef(false)
+  editingRef.current = editing
 
-  useEffect(() => {
-    window.browser.onState((s) => {
-      setState(s)
-      if (!editing) setDraft(prettyUrl(s.url))
-    })
-  }, [editing])
+  useEffect(
+    () =>
+      window.browser.onState((s) => {
+        setState(s)
+        if (!editingRef.current) setDraft(prettyUrl(s.url))
+      }),
+    []
+  )
 
   const send = (action: string, arg?: string) => window.browser.send(userId, action, arg)
 

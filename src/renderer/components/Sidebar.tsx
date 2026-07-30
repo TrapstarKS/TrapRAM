@@ -18,6 +18,7 @@ import {
   TimerReset
 } from 'lucide-react'
 import type { Account } from '@shared/types'
+import { reorderIds } from '@shared/order'
 import { useStore, visibleAccounts } from '../store'
 import { api, presenceColor, presenceLabel, relative } from '../lib/api'
 import { Button, IconButton, Input, Label, Modal, Empty } from './ui'
@@ -41,14 +42,15 @@ export default function Sidebar() {
     else if (acc === null) toast('info', 'Sign-in window closed')
   }
 
+  const manual = (settings?.sortMode ?? 'custom') === 'custom'
+
   async function reorder(targetId: number) {
     const from = dragId.current
     dragId.current = null
-    if (from === null || from === targetId) return
-    const ids = list.map((a) => a.userId)
-    const next = ids.filter((id) => id !== from)
-    next.splice(ids.indexOf(targetId), 0, from)
-    await run('Reordering', () => api.call('account:reorder', next))
+    if (from === null || !manual) return
+    const ids = [...accounts].sort((a, b) => a.order - b.order).map((a) => a.userId)
+    const next = reorderIds(ids, from, targetId)
+    if (next) await run('Reordering', () => api.call('account:reorder', next))
   }
 
   return (
@@ -132,9 +134,9 @@ export default function Sidebar() {
               <div
                 role="button"
                 tabIndex={0}
-                draggable
+                draggable={manual}
                 onDragStart={() => (dragId.current = a.userId)}
-                onDragOver={(e) => e.preventDefault()}
+                onDragOver={(e) => manual && e.preventDefault()}
                 onDrop={() => void reorder(a.userId)}
                 className="row"
                 data-selected={selected.includes(a.userId)}
@@ -346,9 +348,10 @@ function RowMenu({ account, onClose, onEdit }: { account: Account; onClose: () =
       if (!ref.current?.contains(e.target as Node)) onClose()
     }
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    setTimeout(() => document.addEventListener('mousedown', close))
+    const arm = setTimeout(() => document.addEventListener('mousedown', close))
     document.addEventListener('keydown', esc)
     return () => {
+      clearTimeout(arm)
       document.removeEventListener('mousedown', close)
       document.removeEventListener('keydown', esc)
     }

@@ -135,6 +135,11 @@ export function bindEvents(): void {
   api.on('data:changed', (snap: Snapshot) => useStore.setState(snap))
   api.on('toast', (text: string) => useStore.getState().toast('info', text))
   api.on('toast:warn', (text: string) => useStore.getState().toast('err', text))
-  api.on('vault:locked', () => useStore.setState({ vault: { initialized: true, locked: true, mode: 'password' }, ...emptySnapshot }))
+  api.on('vault:locked', (status: VaultStatus | undefined) =>
+    useStore.setState({
+      vault: status ?? { ...(useStore.getState().vault ?? { initialized: true, mode: 'password' }), locked: true },
+      ...emptySnapshot
+    })
+  )
   api.on('update:state', (u: UpdateState) => useStore.setState({ update: u }))
 }

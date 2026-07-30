@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('browser', {
     ipcRenderer.send('browser:cmd', { userId, action, arg })
   },
   onState(fn: (s: unknown) => void) {
-    ipcRenderer.on('browser:state', (_e, s) => fn(s))
+    const listener = (_e: Electron.IpcRendererEvent, s: unknown): void => fn(s)
+    ipcRenderer.on('browser:state', listener)
+    return () => ipcRenderer.removeListener('browser:state', listener)
   }
 })

@@ -14,7 +14,8 @@ export default function UpdateBanner() {
     update.status === 'downloading' ||
     update.status === 'ready' ||
     update.status === 'error'
-  if (!relevant || dismissed === update.version) return null
+  const tag = `${update.status}:${update.version ?? ''}`
+  if (!relevant || dismissed === tag) return null
 
   const downloading = update.status === 'downloading'
   const ready = update.status === 'ready'
@@ -74,7 +75,7 @@ export default function UpdateBanner() {
         )}
 
         <button
-          onClick={() => setDismissed(update.version ?? null)}
+          onClick={() => setDismissed(tag)}
           aria-label="Dismiss update notice"
           className="rounded p-1 text-[var(--color-faint)] transition-colors hover:text-[var(--color-text)]"
         >

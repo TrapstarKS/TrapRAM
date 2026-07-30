@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { randomBytes } from 'node:crypto'
-import { seal, open, buildUri, grid, sanitizeAppStorage, parseEtime, mergeVault, fingerprint, shareable, newSyncKey, normalizeSyncKey, formatSyncKey, deriveSync, claimOwners } from '../src/shared/pure.ts'
+import { seal, open, buildUri, grid, sanitizeAppStorage, parseEtime, mergeVault, fingerprint, shareable, newSyncKey, normalizeSyncKey, formatSyncKey, deriveSync, claimOwners, gate, realPids } from '../src/shared/pure.ts'
+import { reorderIds } from '../src/shared/order.ts'
 import type { Account, SyncPayload } from '../src/shared/types.ts'
 
 const NOW = Date.parse('2026-07-30T12:00:00Z')
@@ -418,4 +419,109 @@ test('tray clients are never attributed to an account', () => {
   const now = 1_000_000
   const list = claimOwners([proc(20, { background: true })], [{ userId: 6, at: now - 25_000 }], now)
   assert.equal(list[0].userId, undefined)
+})
+
+const tick = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+test('gate runs queued work one at a time', async () => {
+  const run = gate()
+  const order: string[] = []
+  let live = 0
+  let peak = 0
+
+  const job = async (name: string, ms: number) => {
+    live++
+    peak = Math.max(peak, live)
+    order.push(`${name}:start`)
+    await tick(ms)
+    order.push(`${name}:end`)
+    live--
+    return name
+  }
+
+  const results = await Promise.all([
+    run(() => job('a', 30)),
+    run(() => job('b', 5)),
+    run(() => job('c', 1))
+  ])
+
+  assert.equal(peak, 1)
+  assert.deepEqual(results, ['a', 'b', 'c'])
+  assert.deepEqual(order, ['a:start', 'a:end', 'b:start', 'b:end', 'c:start', 'c:end'])
+})
+
+test('gate keeps running after a job throws', async () => {
+  const run = gate()
+  const failed = run(async () => {
+    throw new Error('boom')
+  })
+  const after = run(async () => 'still here')
+
+  await assert.rejects(failed, /boom/)
+  assert.equal(await after, 'still here')
+})
+
+test('gate does not start later work before earlier work settles', async () => {
+  const run = gate()
+  const seen: number[] = []
+  const first = run(async () => {
+    await tick(20)
+    throw new Error('first')
+  })
+  const second = run(async () => {
+    seen.push(1)
+  })
+
+  assert.deepEqual(seen, [])
+  await assert.rejects(first, /first/)
+  await second
+  assert.deepEqual(seen, [1])
+})
+
+test('an account lands where it was dropped, in both directions', () => {
+  assert.deepEqual(reorderIds([1, 2, 3, 4], 1, 3), [2, 3, 1, 4])
+  assert.deepEqual(reorderIds([1, 2, 3, 4], 4, 2), [1, 4, 2, 3])
+})
+
+test('the first and last positions are both reachable by dragging', () => {
+  assert.deepEqual(reorderIds([1, 2, 3, 4], 1, 4), [2, 3, 4, 1])
+  assert.deepEqual(reorderIds([1, 2, 3, 4], 4, 1), [4, 1, 2, 3])
+})
+
+test('dropping onto a row always takes that row position', () => {
+  const start = [1, 2, 3, 4, 5]
+  const moved = reorderIds(start, 2, 5)!
+  assert.deepEqual(moved, [1, 3, 4, 5, 2])
+
+  assert.deepEqual(reorderIds(moved, 2, 3), start)
+  assert.deepEqual(reorderIds(moved, 2, 1), [2, 1, 3, 4, 5])
+})
+
+test('a reorder never drops, duplicates or invents an account', () => {
+  const ids = [10, 20, 30, 40, 50]
+  for (const from of ids) {
+    for (const target of ids) {
+      const next = reorderIds(ids, from, target)
+      if (from === target) {
+        assert.equal(next, null)
+        continue
+      }
+      assert.deepEqual([...next!].sort((a, b) => a - b), [...ids].sort((a, b) => a - b))
+    }
+  }
+})
+
+test('a reorder against an unknown or absent id is refused', () => {
+  assert.equal(reorderIds([1, 2, 3], 1, 99), null)
+  assert.equal(reorderIds([1, 2, 3], 99, 2), null)
+  assert.equal(reorderIds([1, 2, 3], 2, 2), null)
+})
+
+test('only real process ids survive on the way to the shell', () => {
+  assert.deepEqual(realPids([1, 2, 3]), [1, 2, 3])
+  assert.deepEqual(realPids([4, 4, 4]), [4])
+  assert.deepEqual(realPids(['5']), [5])
+  assert.deepEqual(realPids(['1; Remove-Item C:\\', 0, -3, 1.5, NaN, Infinity, null, undefined, {}, []]), [])
+  assert.deepEqual(realPids('not an array'), [])
+  assert.deepEqual(realPids(undefined), [])
 })

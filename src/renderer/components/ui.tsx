@@ -11,7 +11,7 @@ export function Button({
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }) {
   return (
-    <button className={`btn btn-${variant} ${className}`} disabled={rest.disabled || loading} {...rest}>
+    <button {...rest} className={`btn btn-${variant} ${className}`} disabled={rest.disabled || loading}>
       {loading ? <Loader2 size={14} strokeWidth={2} className="animate-spin" /> : null}
       {children}
     </button>
@@ -143,7 +143,8 @@ export function Modal({
       if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
-    ref.current?.querySelector<HTMLElement>('input, button, select, textarea')?.focus()
+    const body = ref.current?.querySelector<HTMLElement>('[data-modal-body]')
+    ;(body?.querySelector<HTMLElement>('input, select, textarea') ?? body?.querySelector<HTMLElement>('button'))?.focus()
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
@@ -167,7 +168,13 @@ export function Modal({
             <X size={16} strokeWidth={2} />
           </IconButton>
         </div>
-        {children ? <div className="px-5 py-4">{children}</div> : <div className="h-2" />}
+        {children ? (
+          <div data-modal-body className="px-5 py-4">
+            {children}
+          </div>
+        ) : (
+          <div className="h-2" />
+        )}
         {footer ? (
           <div className="flex justify-end gap-2 border-t bg-[var(--color-bg-deep)]/60 px-5 py-3">{footer}</div>
         ) : null}
