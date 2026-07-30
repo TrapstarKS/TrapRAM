@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { cpus } from 'node:os'
 import { systemPreferences, screen } from 'electron'
-import { grid, parseEtime } from '@shared/pure'
-import { isWin, owners } from './launcher'
+import { grid, parseEtime, claimOwners } from '@shared/pure'
+import { isWin, owners, launches } from './launcher'
 
 const run = promisify(execFile)
 
@@ -19,6 +19,10 @@ export interface RobloxProcess {
 
 function ownerOf(key: string): number | undefined {
   return owners.get(key)
+}
+
+function fillOwners(list: RobloxProcess[]): RobloxProcess[] {
+  return claimOwners(list, launches, Date.now())
 }
 
 const cpuSamples = new Map<number, { seconds: number; at: number }>()
@@ -79,19 +83,21 @@ export async function processes(): Promise<RobloxProcess[]> {
     const live = new Set(list.map((p) => p.pid))
     for (const pid of cpuSamples.keys()) if (!live.has(pid)) cpuSamples.delete(pid)
 
-    return list.map((p) => {
-      const cmd = p.cmd ?? ''
-      const tracker = /-b\s+(\d+)/.exec(cmd)
-      return {
-        pid: p.pid,
-        memoryMb: Math.round(p.mem / 1048576),
-        cpu: cpuPercent(p.pid, p.cpu ?? 0, p.start ?? 0),
-        uptimeSec: p.start ?? 0,
-        priority: p.prio ?? 'Normal',
-        background: cmd.includes('--launch-to-tray'),
-        userId: tracker ? ownerOf(`b:${tracker[1]}`) : undefined
-      }
-    })
+    return fillOwners(
+      list.map((p) => {
+        const cmd = p.cmd ?? ''
+        const tracker = /-b\s+(\d+)/.exec(cmd)
+        return {
+          pid: p.pid,
+          memoryMb: Math.round(p.mem / 1048576),
+          cpu: cpuPercent(p.pid, p.cpu ?? 0, p.start ?? 0),
+          uptimeSec: p.start ?? 0,
+          priority: p.prio ?? 'Normal',
+          background: cmd.includes('--launch-to-tray'),
+          userId: tracker ? ownerOf(`b:${tracker[1]}`) : undefined
+        }
+      })
+    )
   }
 
   const { stdout } = await run('/bin/ps', ['-axo', 'pid=,rss=,time=,etime=,nice=,comm='], {
@@ -120,7 +126,7 @@ export async function processes(): Promise<RobloxProcess[]> {
     })
   }
   for (const pid of cpuSamples.keys()) if (!live.has(pid)) cpuSamples.delete(pid)
-  return out
+  return fillOwners(out)
 }
 
 export async function killBackground(): Promise<number> {

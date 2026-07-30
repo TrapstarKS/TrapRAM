@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { randomBytes } from 'node:crypto'
-import { seal, open, buildUri, grid, sanitizeAppStorage, parseEtime, mergeVault, fingerprint, shareable, newSyncKey, normalizeSyncKey, formatSyncKey, deriveSync } from '../src/shared/pure.ts'
+import { seal, open, buildUri, grid, sanitizeAppStorage, parseEtime, mergeVault, fingerprint, shareable, newSyncKey, normalizeSyncKey, formatSyncKey, deriveSync, claimOwners } from '../src/shared/pure.ts'
 import type { Account, SyncPayload } from '../src/shared/types.ts'
 
 const NOW = Date.parse('2026-07-30T12:00:00Z')
@@ -359,4 +359,63 @@ test('grid centres a short last row', () => {
 test('grid honours the work-area origin', () => {
   const [cell] = grid(1, 1000, 600, 40, 25)
   assert.deepEqual(cell, { x: 40, y: 25, w: 1000, h: 600 })
+})
+
+const proc = (uptimeSec: number, over: { background?: boolean; userId?: number } = {}) => ({
+  uptimeSec,
+  background: over.background ?? false,
+  userId: over.userId
+})
+
+test('a client is matched to the account that was launched just before it started', () => {
+  const now = 1_000_000
+  const list = claimOwners([proc(20)], [{ userId: 7, at: now - 25_000 }], now)
+  assert.equal(list[0].userId, 7)
+})
+
+test('two clients keep the launch order they were started in', () => {
+  const now = 1_000_000
+  const list = claimOwners(
+    [proc(10), proc(60)],
+    [
+      { userId: 1, at: now - 65_000 },
+      { userId: 2, at: now - 14_000 }
+    ],
+    now
+  )
+  assert.equal(list[0].userId, 2)
+  assert.equal(list[1].userId, 1)
+})
+
+test('one launch is never handed to two clients', () => {
+  const now = 1_000_000
+  const list = claimOwners([proc(10), proc(12)], [{ userId: 5, at: now - 15_000 }], now)
+  assert.deepEqual(
+    list.map((p) => p.userId).sort(),
+    [5, undefined]
+  )
+})
+
+test('a client already identified by its tracker id is left alone', () => {
+  const now = 1_000_000
+  const list = claimOwners([proc(10, { userId: 9 })], [{ userId: 3, at: now - 12_000 }], now)
+  assert.equal(list[0].userId, 9)
+})
+
+test('an account is not claimed twice when its tracker already matched', () => {
+  const now = 1_000_000
+  const list = claimOwners([proc(10, { userId: 4 }), proc(11)], [{ userId: 4, at: now - 12_000 }], now)
+  assert.equal(list[1].userId, undefined)
+})
+
+test('a client running long before any launch stays unattributed', () => {
+  const now = 1_000_000
+  const list = claimOwners([proc(4000)], [{ userId: 8, at: now - 10_000 }], now)
+  assert.equal(list[0].userId, undefined)
+})
+
+test('tray clients are never attributed to an account', () => {
+  const now = 1_000_000
+  const list = claimOwners([proc(20, { background: true })], [{ userId: 6, at: now - 25_000 }], now)
+  assert.equal(list[0].userId, undefined)
 })

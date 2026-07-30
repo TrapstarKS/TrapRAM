@@ -10,6 +10,13 @@ export const isWin = process.platform === 'win32'
 export const isMac = process.platform === 'darwin'
 
 export const owners = new Map<string, number>()
+export const launches: { userId: number; at: number }[] = []
+
+function remember(userId: number): void {
+  const now = Date.now()
+  launches.push({ userId, at: now })
+  while (launches.length > 32 || (launches.length > 0 && now - launches[0].at > 1_800_000)) launches.shift()
+}
 
 export async function launch(
   cookie: string,
@@ -21,7 +28,10 @@ export async function launch(
   const tracker = Math.floor(Math.random() * 1e9)
   const uri = buildUri(ticket, target, tracker, Date.now())
 
-  if (userId) owners.set(`b:${tracker}`, userId)
+  if (userId) {
+    owners.set(`b:${tracker}`, userId)
+    remember(userId)
+  }
 
   if (isMac && multiInstance) {
     const macmulti = await import('./macmulti')

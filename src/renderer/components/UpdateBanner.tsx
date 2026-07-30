@@ -9,11 +9,16 @@ export default function UpdateBanner() {
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [notesOpen, setNotesOpen] = useState(false)
 
-  const relevant = update.status === 'available' || update.status === 'downloading' || update.status === 'ready'
+  const relevant =
+    update.status === 'available' ||
+    update.status === 'downloading' ||
+    update.status === 'ready' ||
+    update.status === 'error'
   if (!relevant || dismissed === update.version) return null
 
   const downloading = update.status === 'downloading'
   const ready = update.status === 'ready'
+  const failed = update.status === 'error'
 
   return (
     <>
@@ -27,9 +32,17 @@ export default function UpdateBanner() {
 
         <div className="min-w-0 flex-1">
           <div className="text-[12.5px] font-semibold">
-            {ready ? `Version ${update.version} is ready to install` : `Version ${update.version} is available`}
+            {failed
+              ? 'The update could not be installed'
+              : ready
+                ? `Version ${update.version} is ready to install`
+                : `Version ${update.version} is available`}
           </div>
-          {downloading ? (
+          {failed ? (
+            <div className="mt-0.5 text-[11.5px] leading-snug text-[var(--color-dim)]">
+              {update.error} — download it by hand from the releases page.
+            </div>
+          ) : downloading ? (
             <div className="mt-1.5 h-1 w-full max-w-[240px] overflow-hidden rounded-full bg-[var(--color-bg-deep)]">
               <div
                 className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-300 ease-[var(--ease-out)]"
@@ -46,7 +59,7 @@ export default function UpdateBanner() {
           ) : null}
         </div>
 
-        {downloading ? (
+        {failed ? null : downloading ? (
           <span className="num text-[12px] text-[var(--color-dim)]">{update.percent ?? 0}%</span>
         ) : ready ? (
           <Button variant="primary" onClick={() => void api.call('update:install')}>

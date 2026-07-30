@@ -272,3 +272,39 @@ export function grid(count: number, w: number, h: number, x0 = 0, y0 = 0): Cell[
     return { x: x0 + offset + (i % cols) * cw, y: y0 + row * ch, w: cw, h: ch }
   })
 }
+
+export interface Launch {
+  userId: number
+  at: number
+}
+
+export interface Owned {
+  uptimeSec: number
+  background: boolean
+  userId?: number
+}
+
+const CLAIM_AHEAD_MS = 15_000
+const CLAIM_BEHIND_MS = 180_000
+
+export function claimOwners<T extends Owned>(list: T[], launches: Launch[], now: number): T[] {
+  const taken = new Set(list.map((p) => p.userId).filter((id): id is number => id !== undefined))
+  const free = launches.filter((l) => !taken.has(l.userId))
+  if (!free.length) return list
+
+  for (const p of list
+    .filter((x) => x.userId === undefined && !x.background)
+    .sort((a, b) => b.uptimeSec - a.uptimeSec)) {
+    const startedAt = now - p.uptimeSec * 1000
+    let best = -1
+    for (let i = 0; i < free.length; i++) {
+      const gap = startedAt - free[i].at
+      if (gap < -CLAIM_AHEAD_MS || gap > CLAIM_BEHIND_MS) continue
+      if (best < 0 || free[i].at > free[best].at) best = i
+    }
+    if (best < 0) continue
+    p.userId = free[best].userId
+    free.splice(best, 1)
+  }
+  return list
+}
