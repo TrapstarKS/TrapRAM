@@ -74,7 +74,7 @@ jobs:
         env:
           FINGERPRINT: 0a15f0539b0f02a8d880e637b0c2744f1f0b5dfb
         run: |
-          npx electron-builder --mac --dir
+          npx electron-builder --mac --dir --x64 --arm64
           status=0
           found=0
           for app in dist/mac*/TrapRAM.app; do
