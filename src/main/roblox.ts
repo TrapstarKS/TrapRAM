@@ -4,7 +4,10 @@ import type { GameServer, Moderation, Presence } from '@shared/types'
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
-let csrf = ''
+const TIMEOUT_MS = 20_000
+
+const csrfTokens = new Map<string, string>()
+const csrfKey = (cookie?: string): string => (cookie ? cookie.slice(-24) : 'anon')
 
 class RobloxError extends Error {
   constructor(
@@ -30,22 +33,35 @@ async function call(url: string, opts: Req = {}, attempt = 0): Promise<Response>
     Origin: 'https://www.roblox.com',
     'Accept-Language': 'en-US,en;q=0.9'
   }
+  const key = csrfKey(opts.cookie)
+  const token = csrfTokens.get(key)
   if (opts.cookie) headers.Cookie = `.ROBLOSECURITY=${opts.cookie}`
-  if (csrf) headers['x-csrf-token'] = csrf
+  if (token) headers['x-csrf-token'] = token
   if (opts.method === 'POST') headers['Content-Type'] = 'application/json'
   Object.assign(headers, opts.headers)
 
-  const res = await fetch(url, {
-    method: opts.method ?? 'GET',
-    headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    redirect: opts.redirect ?? 'follow'
-  })
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: opts.method ?? 'GET',
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      redirect: opts.redirect ?? 'follow',
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    })
+  } catch (e) {
+    const name = (e as Error)?.name
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new RobloxError(408, 'Roblox did not answer in time — check your connection and try again')
+    }
+    throw e
+  }
 
   if (res.status === 403) {
-    const token = res.headers.get('x-csrf-token')
-    if (token && token !== csrf && attempt < 2) {
-      csrf = token
+    const fresh = res.headers.get('x-csrf-token')
+    if (fresh && fresh !== token && attempt < 2) {
+      while (csrfTokens.size > 64) csrfTokens.delete(csrfTokens.keys().next().value as string)
+      csrfTokens.set(key, fresh)
       return call(url, opts, attempt + 1)
     }
   }
