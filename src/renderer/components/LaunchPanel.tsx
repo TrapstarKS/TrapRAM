@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Play, Search, Bookmark, Users2, Rocket, Link2, MousePointerClick, Layers } from 'lucide-react'
 import type { Preset } from '@shared/types'
 import { useStore, visibleAccounts } from '../store'
@@ -17,8 +17,15 @@ export default function LaunchPanel() {
   const { selected, accounts, presets, settings, run, toast, setTab, patchSettings } = store
   const [placeId, setPlaceId] = useState('')
   const [jobId, setJobId] = useState('')
+  const seeded = useRef(false)
   const [meta, setMeta] = useState<GameMeta | null>(null)
   const [resolving, setResolving] = useState(false)
+
+  useEffect(() => {
+    if (seeded.current || !settings) return
+    seeded.current = true
+    if (settings.lastPlaceId) setPlaceId(String(settings.lastPlaceId))
+  }, [settings])
 
   const chosen = accounts.filter((a) => selected.includes(a.userId))
   const usable = chosen.filter((a) => !a.cookieExpired)
@@ -32,7 +39,11 @@ export default function LaunchPanel() {
     const t = setTimeout(async () => {
       try {
         const m = await api.call<GameMeta>('game:ping', numericPlace)
-        if (!cancelled) setMeta(m)
+        if (cancelled) return
+        setMeta(m)
+        if (useStore.getState().settings?.lastPlaceId !== numericPlace) {
+          void patchSettings({ lastPlaceId: numericPlace })
+        }
       } catch {
         if (!cancelled) setMeta(null)
       } finally {
@@ -142,7 +153,10 @@ export default function LaunchPanel() {
               </div>
               <Button
                 className="!h-[28px] !text-[12px]"
-                onClick={() => setTab('servers')}
+                onClick={() => {
+                  void patchSettings({ lastPlaceId: numericPlace })
+                  setTab('servers')
+                }}
                 disabled={!meta}
                 title="Pick a specific server"
               >

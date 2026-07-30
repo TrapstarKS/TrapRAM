@@ -88,6 +88,7 @@ export interface Settings {
   syncUrl: string
   syncAuto: boolean
   syncIntervalMin: number
+  lastPlaceId: number
 }
 
 export interface SyncPayload {

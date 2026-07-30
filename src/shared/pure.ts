@@ -90,7 +90,8 @@ export function sanitizeAppStorage(
   return out
 }
 
-export function parseEtime(value: string): number {
+export function parseEtime(raw: string): number {
+  const value = raw.replace(',', '.')
   const [days, rest] = value.includes('-') ? value.split('-') : ['0', value]
   const parts = rest.split(':').map(Number)
   if (parts.some(Number.isNaN)) return 0

@@ -18,6 +18,7 @@ let main: BrowserWindow | null = null
 let presenceTimer: NodeJS.Timeout | null = null
 let refreshTimer: NodeJS.Timeout | null = null
 let syncTimer: NodeJS.Timeout | null = null
+let trayTimer: NodeJS.Timeout | null = null
 let syncDebounce: NodeJS.Timeout | null = null
 let lastLaunchAt = 0
 
@@ -207,6 +208,16 @@ function startSyncLoop(): void {
 
   syncTimer = setInterval(() => void backgroundSync(), Math.max(5, s.syncIntervalMin) * 60_000)
   syncTimer.unref()
+}
+
+function startTraySweep(): void {
+  if (trayTimer) clearInterval(trayTimer)
+  trayTimer = null
+  if (!launcher.isWin || !store.get().killTrayProcesses) return
+  trayTimer = setInterval(() => {
+    void system.killBackground().catch(() => undefined)
+  }, 60_000)
+  trayTimer.unref()
 }
 
 function startPresenceLoop(): void {
@@ -503,6 +514,10 @@ function registerIpc(): void {
     if (patch.presencePollSeconds !== undefined) startPresenceLoop()
     if (patch.autoRefreshCookies !== undefined) startRefreshLoop()
     if (patch.syncAuto !== undefined || patch.syncIntervalMin !== undefined) startSyncLoop()
+    if (patch.killTrayProcesses !== undefined) {
+      startTraySweep()
+      if (next.killTrayProcesses) void system.killBackground().catch(() => undefined)
+    }
     if (patch.multiInstance !== undefined && launcher.isWin) await launcher.setMultiInstance(next.multiInstance)
     if (patch.openAtLogin !== undefined) {
       app.setLoginItemSettings({ openAtLogin: next.openAtLogin })
@@ -520,6 +535,7 @@ function registerIpc(): void {
   handle('system:affinity', (pids: number[], cores: number) => system.setAffinity(pids, cores), false)
   handle('system:trim', (pids: number[]) => system.trimMemory(pids), false)
   handle('system:tile', () => system.tileWindows(), false)
+  handle('system:killBackground', () => system.killBackground(), false)
   handle('system:accessibility', () => system.accessibilityGranted(), false)
   handle('system:requestAccessibility', () => system.requestAccessibility(), false)
   handle('system:openExternal', (url: string) => shell.openExternal(url), false)
@@ -650,6 +666,7 @@ app.whenReady().then(async () => {
   if (store.get().multiInstance) {
     launcher.setMultiInstance(true).catch((e: Error) => send('toast:warn', e.message))
   }
+  startTraySweep()
   createWindow()
 
   app.on('activate', () => {

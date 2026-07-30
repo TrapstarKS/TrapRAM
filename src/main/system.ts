@@ -13,6 +13,25 @@ export interface RobloxProcess {
   cpu: number
   uptimeSec: number
   priority: string
+  background: boolean
+}
+
+const cpuSamples = new Map<number, { seconds: number; at: number }>()
+const cores = Math.max(1, cpus().length)
+
+function cpuPercent(pid: number, seconds: number, uptimeSec: number): number {
+  const at = Date.now()
+  const prev = cpuSamples.get(pid)
+  cpuSamples.set(pid, { seconds, at })
+
+  let used = seconds
+  let over = uptimeSec
+  if (prev && at > prev.at) {
+    used = seconds - prev.seconds
+    over = (at - prev.at) / 1000
+  }
+  if (over <= 0) return 0
+  return Math.max(0, Math.min(100, Math.round(((used / over) * 100) / cores * 10) / 10))
 }
 
 async function ps(script: string): Promise<string> {
@@ -23,45 +42,79 @@ async function ps(script: string): Promise<string> {
   return stdout
 }
 
+interface WinProcess {
+  pid: number
+  mem: number
+  cpu: number
+  start: number
+  prio: string
+  cmd: string | null
+}
+
 export async function processes(): Promise<RobloxProcess[]> {
   if (isWin) {
     const out = await ps(
-      "Get-Process -Name RobloxPlayerBeta -ErrorAction SilentlyContinue | " +
+      "$cmd = @{}; Get-CimInstance Win32_Process -Filter 'Name=''RobloxPlayerBeta.exe''' -ErrorAction SilentlyContinue | " +
+        'ForEach-Object { $cmd[[int]$_.ProcessId] = $_.CommandLine }; ' +
+        'Get-Process -Name RobloxPlayerBeta -ErrorAction SilentlyContinue | ' +
         'ForEach-Object { [pscustomobject]@{ pid=$_.Id; mem=$_.WorkingSet64; cpu=$_.CPU; ' +
-        'start=[int]((Get-Date) - $_.StartTime).TotalSeconds; prio=$_.PriorityClass.ToString() } } | ConvertTo-Json -Compress'
+        'start=[int]((Get-Date) - $_.StartTime).TotalSeconds; prio=$_.PriorityClass.ToString(); ' +
+        'cmd=$cmd[[int]$_.Id] } } | ConvertTo-Json -Compress'
     ).catch(() => '')
     if (!out.trim()) return []
-    const parsed = JSON.parse(out)
-    const list = Array.isArray(parsed) ? parsed : [parsed]
-    return list.map((p: { pid: number; mem: number; cpu: number; start: number; prio: string }) => ({
+
+    let list: WinProcess[]
+    try {
+      const parsed = JSON.parse(out)
+      list = Array.isArray(parsed) ? parsed : [parsed]
+    } catch {
+      return []
+    }
+
+    const live = new Set(list.map((p) => p.pid))
+    for (const pid of cpuSamples.keys()) if (!live.has(pid)) cpuSamples.delete(pid)
+
+    return list.map((p) => ({
       pid: p.pid,
       memoryMb: Math.round(p.mem / 1048576),
-      cpu: Math.round((p.cpu ?? 0) * 10) / 10,
+      cpu: cpuPercent(p.pid, p.cpu ?? 0, p.start ?? 0),
       uptimeSec: p.start ?? 0,
-      priority: p.prio ?? 'Normal'
+      priority: p.prio ?? 'Normal',
+      background: (p.cmd ?? '').includes('--launch-to-tray')
     }))
   }
 
-  const { stdout } = await run('/bin/ps', ['-axo', 'pid=,rss=,%cpu=,etime=,nice=,comm='], {
+  const { stdout } = await run('/bin/ps', ['-axo', 'pid=,rss=,time=,etime=,nice=,comm='], {
     maxBuffer: 16 * 1024 * 1024
   }).catch(() => ({ stdout: '' }))
 
   const out: RobloxProcess[] = []
+  const live = new Set<number>()
   for (const line of stdout.split('\n')) {
-    const m = line.trim().match(/^(\d+)\s+(\d+)\s+([\d.,]+)\s+(\S+)\s+(-?\d+)\s+(.+)$/)
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(-?\d+)\s+(.+)$/)
     if (!m) continue
-    const comm = m[6]
-    if (!/\/RobloxPlayer$/.test(comm)) continue
+    if (!/\/RobloxPlayer$/.test(m[6])) continue
+    const pid = Number(m[1])
     const nice = Number(m[5])
+    const uptimeSec = parseEtime(m[4])
+    live.add(pid)
     out.push({
-      pid: Number(m[1]),
+      pid,
       memoryMb: Math.round(Number(m[2]) / 1024),
-      cpu: Number(m[3].replace(',', '.')) || 0,
-      uptimeSec: parseEtime(m[4]),
-      priority: nice < 0 ? 'High' : nice > 5 ? 'Low' : nice > 0 ? 'BelowNormal' : 'Normal'
+      cpu: cpuPercent(pid, parseEtime(m[3]), uptimeSec),
+      uptimeSec,
+      priority: nice < 0 ? 'High' : nice > 5 ? 'Low' : nice > 0 ? 'BelowNormal' : 'Normal',
+      background: false
     })
   }
+  for (const pid of cpuSamples.keys()) if (!live.has(pid)) cpuSamples.delete(pid)
   return out
+}
+
+export async function killBackground(): Promise<number> {
+  if (!isWin) return 0
+  const targets = (await processes()).filter((p) => p.background).map((p) => p.pid)
+  return targets.length ? kill(targets) : 0
 }
 
 export async function kill(pids: number[]): Promise<number> {

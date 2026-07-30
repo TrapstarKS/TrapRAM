@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Server, Play, RefreshCw, Search } from 'lucide-react'
 import type { GameServer } from '@shared/types'
 import { useStore } from '../store'
@@ -8,12 +8,19 @@ import { Button, Input, Label, Empty, Section, Segmented } from './ui'
 type Filter = 'all' | 'empty' | 'full'
 
 export default function ServersPanel() {
-  const { selected, accounts, run, toast } = useStore()
-  const [placeId, setPlaceId] = useState('')
+  const { selected, accounts, settings, run, toast } = useStore()
+  const [placeId, setPlaceId] = useState(() => {
+    const last = useStore.getState().settings?.lastPlaceId
+    return last ? String(last) : ''
+  })
   const [list, setList] = useState<GameServer[]>([])
   const [cursor, setCursor] = useState<string | undefined>()
   const [filter, setFilter] = useState<Filter>('all')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (settings?.lastPlaceId && !placeId) setPlaceId(String(settings.lastPlaceId))
+  }, [settings?.lastPlaceId])
 
   const usable = accounts.filter((a) => selected.includes(a.userId) && !a.cookieExpired)
   const numericPlace = Number(placeId.replace(/\D/g, ''))

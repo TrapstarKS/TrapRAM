@@ -109,6 +109,17 @@ export default function SettingsPanel() {
           hint={win ? 'Windows only, and not enough on its own — keep profile isolation on too' : 'That file does not exist on macOS; profile isolation is what does the work here'}
         />
         <Switch
+          checked={settings.killTrayProcesses}
+          onChange={(killTrayProcesses) => void patchSettings({ killTrayProcesses })}
+          disabled={!win}
+          label="Close Roblox instances that linger in the tray"
+          hint={
+            win
+              ? 'Roblox leaves a client running with no game attached, and they pile up. TrapRAM closes those every minute — clients you are actually playing on are left alone.'
+              : 'Windows only — Roblox does not leave tray instances on macOS'
+          }
+        />
+        <Switch
           checked={settings.multiInstance}
           onChange={(multiInstance) => void patchSettings({ multiInstance })}
           label="Allow multiple clients at once"

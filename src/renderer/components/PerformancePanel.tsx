@@ -10,6 +10,7 @@ interface Proc {
   cpu: number
   uptimeSec: number
   priority: string
+  background: boolean
 }
 
 interface FlagPreset {
@@ -156,6 +157,7 @@ export default function PerformancePanel() {
 
   const targets = picked.length ? picked : procs.map((p) => p.pid)
   const totalMem = procs.reduce((n, p) => n + p.memoryMb, 0)
+  const background = procs.filter((p) => p.background).length
 
   async function tile() {
     const res = await run('Arranging windows', () =>
@@ -198,9 +200,26 @@ export default function PerformancePanel() {
     <div className="p-5">
       <Section
         title="Running clients"
-        hint={procs.length ? `${procs.length} running · ${totalMem.toLocaleString()} MB total` : 'Nothing running'}
+        hint={
+          procs.length
+            ? `${procs.length - background} in game${background ? `, ${background} in the tray` : ''} · ${totalMem.toLocaleString()} MB total`
+            : 'Nothing running'
+        }
         actions={
           <div className="flex gap-2">
+            <Button
+              className="!h-[28px] !text-[12px]"
+              disabled={!background}
+              title="Close the Roblox instances that sit in the tray with no game running"
+              onClick={() =>
+                void run('Closing background clients', () => api.call<number>('system:killBackground')).then(
+                  (n) => n !== undefined && toast('ok', n ? `Closed ${n} background client${n === 1 ? '' : 's'}` : 'None left')
+                )
+              }
+            >
+              <Trash size={13} strokeWidth={1.75} />
+              Tray
+            </Button>
             <Button className="!h-[28px] !text-[12px]" onClick={() => void tile()} disabled={!procs.length}>
               <LayoutGrid size={13} strokeWidth={1.75} />
               Arrange
@@ -264,6 +283,7 @@ export default function PerformancePanel() {
                       </span>
                       <span className="num text-[11px] text-[var(--color-faint)]">
                         {p.memoryMb.toLocaleString()} MB · {p.cpu}% CPU · up {duration(p.uptimeSec)}
+                        {p.background ? ' · background' : ''}
                       </span>
                     </span>
                     <span className="chip shrink-0 bg-[var(--color-raised)] text-[var(--color-dim)]">{p.priority}</span>

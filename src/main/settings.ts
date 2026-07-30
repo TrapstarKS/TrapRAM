@@ -9,7 +9,7 @@ export const DEFAULTS: Settings = {
   theme: 'dark',
   accent: 'violet',
   multiInstance: false,
-  killTrayProcesses: false,
+  killTrayProcesses: true,
   launchDelayMs: 3000,
   privacyMode: true,
   isolateProfiles: true,
@@ -30,7 +30,8 @@ export const DEFAULTS: Settings = {
   robloxPath: '',
   syncUrl: '',
   syncAuto: true,
-  syncIntervalMin: 15
+  syncIntervalMin: 15,
+  lastPlaceId: 0
 }
 
 let cache: Settings | null = null

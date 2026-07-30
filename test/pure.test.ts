@@ -216,6 +216,13 @@ test('ps elapsed time parses in all three BSD shapes', () => {
   assert.equal(parseEtime('garbage'), 0)
 })
 
+test('cpu time keeps its fraction, comma decimals and all', () => {
+  assert.equal(parseEtime('0:03.45'), 3.45)
+  assert.equal(parseEtime('12:34.56'), 754.56)
+  assert.equal(parseEtime('0:03,45'), 3.45)
+  assert.equal(parseEtime('1:02:03.5'), 3723.5)
+})
+
 let counter = 0
 const stubId = () => `id-${++counter}`
 
