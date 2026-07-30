@@ -30,6 +30,11 @@ function hostAllowed(url: string): boolean {
   }
 }
 
+export function openExternal(url: string): void {
+  if (!/^https?:\/\//i.test(url)) return
+  void shell.openExternal(url).catch(() => undefined)
+}
+
 function harden(ses: Session): void {
   ses.setPermissionRequestHandler((_wc, permission, cb) => {
     cb(permission === 'clipboard-sanitized-write' || permission === 'fullscreen')
@@ -43,15 +48,16 @@ function harden(ses: Session): void {
 }
 
 function guardNavigation(view: { webContents: Electron.WebContents }): void {
-  view.webContents.on('will-navigate', (e, url) => {
-    if (!hostAllowed(url)) {
-      e.preventDefault()
-      shell.openExternal(url)
-    }
-  })
+  const block = (e: Electron.Event, url: string): void => {
+    if (hostAllowed(url)) return
+    e.preventDefault()
+    openExternal(url)
+  }
+  view.webContents.on('will-navigate', block)
+  view.webContents.on('will-redirect', block)
   view.webContents.setWindowOpenHandler(({ url }) => {
     if (hostAllowed(url)) return { action: 'allow' }
-    shell.openExternal(url)
+    openExternal(url)
     return { action: 'deny' }
   })
 }
@@ -96,7 +102,7 @@ export async function openLogin(parent?: BrowserWindow): Promise<string | null> 
     })
     win.webContents.on('did-navigate', () => void check())
     win.on('closed', () => finish(null))
-    win.loadURL(LOGIN_URL)
+    void win.loadURL(LOGIN_URL).catch(() => finish(null))
   })
 }
 
@@ -205,6 +211,10 @@ export async function openBrowseAs(opts: {
 
   const record: BrowseWindow = { win, content, toolbar }
   browseWindows.set(opts.userId, record)
+  win.on('closed', () => {
+    browseWindows.delete(opts.userId)
+    void ses.clearStorageData().catch(() => undefined)
+  })
 
   guardNavigation(content)
   const update = () => sendState(record)
@@ -230,14 +240,8 @@ export async function openBrowseAs(opts: {
   const overlayUrl = process.env.ELECTRON_RENDERER_URL
     ? `${process.env.ELECTRON_RENDERER_URL}/overlay.html?${query}`
     : `file://${join(__dirname, '../renderer/overlay.html')}?${query}`
-  await toolbar.webContents.loadURL(overlayUrl)
-
-  await content.webContents.loadURL(opts.startUrl ?? HOME_URL)
-
-  win.on('closed', () => {
-    browseWindows.delete(opts.userId)
-    void ses.clearStorageData().catch(() => undefined)
-  })
+  await toolbar.webContents.loadURL(overlayUrl).catch(() => undefined)
+  await content.webContents.loadURL(opts.startUrl ?? HOME_URL).catch(() => undefined)
 
   return extensions
 }
@@ -257,20 +261,20 @@ export function browserCommand(userId: number, action: string, arg?: string): vo
       wc.isLoading() ? wc.stop() : wc.reload()
       break
     case 'home':
-      wc.loadURL(HOME_URL)
+      void wc.loadURL(HOME_URL).catch(() => undefined)
       break
     case 'go': {
       if (!arg) break
       const url = /^https?:\/\//i.test(arg) ? arg : `https://${arg}`
-      if (hostAllowed(url)) wc.loadURL(url)
-      else shell.openExternal(url)
+      if (hostAllowed(url)) void wc.loadURL(url).catch(() => undefined)
+      else openExternal(url)
       break
     }
     case 'devtools':
       wc.toggleDevTools()
       break
     case 'external':
-      shell.openExternal(wc.getURL())
+      openExternal(wc.getURL())
       break
   }
 }

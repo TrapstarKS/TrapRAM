@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { cpus } from 'node:os'
 import { systemPreferences, screen } from 'electron'
-import { grid, parseEtime, claimOwners } from '@shared/pure'
+import { grid, parseEtime, claimOwners, realPids } from '@shared/pure'
 import { isWin, owners, launches } from './launcher'
 
 const run = promisify(execFile)
@@ -135,7 +135,8 @@ export async function killBackground(): Promise<number> {
   return targets.length ? kill(targets) : 0
 }
 
-export async function kill(pids: number[]): Promise<number> {
+export async function kill(list: number[]): Promise<number> {
+  const pids = realPids(list)
   let n = 0
   for (const pid of pids) {
     try {
@@ -167,7 +168,8 @@ const WIN_PRIORITY: Record<string, string> = {
 }
 const NICE: Record<string, number> = { low: 15, below: 8, normal: 0, above: -5, high: -10 }
 
-export async function setPriority(pids: number[], level: keyof typeof NICE): Promise<void> {
+export async function setPriority(list: number[], level: keyof typeof NICE): Promise<void> {
+  const pids = realPids(list)
   if (!pids.length) return
   if (isWin) {
     const cls = WIN_PRIORITY[level] ?? 'Normal'
@@ -183,15 +185,17 @@ export async function setPriority(pids: number[], level: keyof typeof NICE): Pro
   })
 }
 
-export async function setAffinity(pids: number[], cores: number): Promise<void> {
+export async function setAffinity(list: number[], cores: number): Promise<void> {
+  const pids = realPids(list)
   if (!isWin || !pids.length) return
   const total = cpus().length
-  const n = Math.max(1, Math.min(cores || total, total))
+  const n = Math.max(1, Math.min(Math.floor(Number(cores)) || total, total))
   const mask = (1n << BigInt(n)) - 1n
   await ps(pids.map((p) => `try { (Get-Process -Id ${p}).ProcessorAffinity = [IntPtr]${mask} } catch {}`).join('; '))
 }
 
-export async function trimMemory(pids: number[]): Promise<number> {
+export async function trimMemory(list: number[]): Promise<number> {
+  const pids = realPids(list)
   if (!isWin || !pids.length) return 0
   const out = await ps(
     `Add-Type -Name W -Namespace T -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool SetProcessWorkingSetSize(IntPtr h, IntPtr min, IntPtr max);' ; ` +

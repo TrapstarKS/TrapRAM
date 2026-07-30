@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import type { Account, LaunchTarget, Preset, PrivateServer, Settings, SyncState } from '@shared/types'
+import { gate } from '@shared/pure'
 import { Vault } from './vault'
 import * as roblox from './roblox'
 import * as launcher from './launcher'
@@ -21,8 +22,13 @@ let syncTimer: NodeJS.Timeout | null = null
 let trayTimer: NodeJS.Timeout | null = null
 let syncDebounce: NodeJS.Timeout | null = null
 let lastLaunchAt = 0
+let polling = false
 
-if (!app.requestSingleInstanceLock()) app.quit()
+const launches = gate()
+
+const primary = app.requestSingleInstanceLock()
+if (!primary) app.quit()
+
 app.on('second-instance', () => {
   if (main) {
     if (main.isMinimized()) main.restore()
@@ -75,7 +81,7 @@ function createWindow(): void {
     store.saveWindowState({ width: b.width, height: b.height, x: b.x, y: b.y })
   })
   main.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    browser.openExternal(url)
     return { action: 'deny' }
   })
 
@@ -85,7 +91,7 @@ function createWindow(): void {
   updater.attach(main, store.get().autoUpdate)
 }
 
-async function refreshAccounts(userIds?: number[]): Promise<void> {
+async function refreshAccounts(userIds?: number[], reloadAvatars = false): Promise<void> {
   if (!vault.isUnlocked) return
   const d = vault.read()
   const targets = d.accounts.filter((a) => !userIds || userIds.includes(a.userId))
@@ -93,20 +99,43 @@ async function refreshAccounts(userIds?: number[]): Promise<void> {
 
   const anyCookie = Object.values(d.cookies)[0]
   const ids = targets.map((a) => a.userId)
+  const wantPics = targets.filter((a) => reloadAvatars || !a.avatarUrl).map((a) => a.userId)
 
   const [pres, pics] = await Promise.all([
     anyCookie
       ? roblox.presences(anyCookie, ids).catch(() => ({}) as Awaited<ReturnType<typeof roblox.presences>>)
       : Promise.resolve({} as Awaited<ReturnType<typeof roblox.presences>>),
-    roblox.avatars(ids).catch(() => ({}) as Awaited<ReturnType<typeof roblox.avatars>>)
+    wantPics.length
+      ? roblox.avatars(wantPics).catch(() => ({}) as Awaited<ReturnType<typeof roblox.avatars>>)
+      : Promise.resolve({} as Awaited<ReturnType<typeof roblox.avatars>>)
   ])
 
-  for (const a of targets) {
-    if (pres[a.userId]) a.presence = pres[a.userId]
-    if (pics[a.userId]) a.avatarUrl = pics[a.userId]
+  if (!vault.isUnlocked) return
+  let changed = false
+  for (const a of vault.read().accounts) {
+    const p = pres[a.userId]
+    if (p && JSON.stringify(p) !== JSON.stringify(a.presence)) {
+      a.presence = p
+      changed = true
+    }
+    if (pics[a.userId] && pics[a.userId] !== a.avatarUrl) {
+      a.avatarUrl = pics[a.userId]
+      changed = true
+    }
   }
+  if (!changed) return
   await vault.save()
   pushData()
+}
+
+function pollPresence(): void {
+  if (polling || !vault.isUnlocked) return
+  polling = true
+  void refreshAccounts()
+    .catch(() => undefined)
+    .finally(() => {
+      polling = false
+    })
 }
 
 async function revalidate(userId: number): Promise<Account | undefined> {
@@ -223,9 +252,7 @@ function startTraySweep(): void {
 function startPresenceLoop(): void {
   if (presenceTimer) clearInterval(presenceTimer)
   const secs = Math.max(20, store.get().presencePollSeconds)
-  presenceTimer = setInterval(() => {
-    if (vault.isUnlocked) void refreshAccounts()
-  }, secs * 1000)
+  presenceTimer = setInterval(pollPresence, secs * 1000)
   presenceTimer.unref()
 }
 
@@ -241,7 +268,7 @@ async function addFromCookie(cookie: string): Promise<Account> {
     existing.cookieExpired = false
     existing.lastValidated = new Date().toISOString()
     await vault.save()
-    void refreshAccounts([info.userId])
+    void refreshAccounts([info.userId]).catch(() => undefined)
     scheduleSync()
     return existing
   }
@@ -265,7 +292,7 @@ async function addFromCookie(cookie: string): Promise<Account> {
   d.accounts.push(acc)
   delete d.tombstones[String(info.userId)]
   await vault.save()
-  void refreshAccounts([info.userId])
+  void refreshAccounts([info.userId]).catch(() => undefined)
   scheduleSync()
   return acc
 }
@@ -296,25 +323,27 @@ async function enableMultiInstance(): Promise<void> {
 }
 
 async function launchOne(userId: number, target: LaunchTarget): Promise<void> {
-  const s = store.get()
-  if (s.isolateProfiles) {
-    const res = await profiles.activate(userId)
-    if (!res.swapped && res.reason === 'client-running') {
-      send('toast', 'Client profile left as-is — another Roblox client is already running')
+  return launches(async () => {
+    const s = store.get()
+    if (s.isolateProfiles) {
+      const res = await profiles.activate(userId)
+      if (!res.swapped && res.reason === 'client-running') {
+        send('toast', 'Client profile left as-is — another Roblox client is already running')
+      }
     }
-  }
-  if (s.privacyMode) await launcher.clearTrackingCookies()
+    if (s.privacyMode) await launcher.clearTrackingCookies()
 
-  if (s.multiInstance && launcher.isWin) {
-    await enableMultiInstance().catch((e: Error) => send('toast:warn', e.message))
-  }
-  await throttle()
-  await launcher.launch(vault.cookie(userId), target, s.multiInstance, userId)
-  const acc = vault.read().accounts.find((a) => a.userId === userId)
-  if (acc) {
-    acc.lastLaunch = new Date().toISOString()
-    await vault.save()
-  }
+    if (s.multiInstance && launcher.isWin) {
+      await enableMultiInstance().catch((e: Error) => send('toast:warn', e.message))
+    }
+    await throttle()
+    await launcher.launch(vault.cookie(userId), target, s.multiInstance, userId)
+    const acc = vault.read().accounts.find((a) => a.userId === userId)
+    if (acc) {
+      acc.lastLaunch = new Date().toISOString()
+      await vault.save()
+    }
+  })
 }
 
 type Handler = (...args: never[]) => unknown
@@ -347,7 +376,7 @@ function registerIpc(): void {
     startPresenceLoop()
     startRefreshLoop()
     startSyncLoop()
-    void refreshAccounts()
+    pollPresence()
     void backgroundSync()
     return snapshot()
   }, false)
@@ -355,8 +384,14 @@ function registerIpc(): void {
     vault.lock()
     return true
   }, false)
-  handle('vault:changePassword', (cur: string, next: string) => vault.changePassword(cur, next))
-  handle('vault:useKeychain', () => vault.switchToKeychain())
+  handle('vault:changePassword', async (cur: string, next: string) => {
+    await vault.changePassword(cur, next)
+    return vault.status()
+  })
+  handle('vault:useKeychain', async () => {
+    await vault.switchToKeychain()
+    return vault.status()
+  })
 
   handle('data:all', () => snapshot())
 
@@ -406,7 +441,7 @@ function registerIpc(): void {
     scheduleSync()
   })
   handle('account:refresh', async (userIds?: number[]) => {
-    await refreshAccounts(userIds)
+    await refreshAccounts(userIds, true)
     return snapshot()
   })
   handle('account:revalidate', async (userIds: number[]) => {
@@ -418,10 +453,13 @@ function registerIpc(): void {
   handle('account:balance', (userId: number) => roblox.balance(vault.cookie(userId), userId))
   handle('account:copyCookie', (userId: number) => {
     if (store.get().hideCookieActions) throw new Error('Cookie actions are disabled in Settings')
-    clipboard.writeText(vault.cookie(userId))
+    const cookie = vault.cookie(userId)
+    clipboard.writeText(cookie)
     setTimeout(() => {
-      if (clipboard.readText() === vault.cookie(userId)) clipboard.clear()
-    }, 45_000)
+      try {
+        if (clipboard.readText() === cookie) clipboard.clear()
+      } catch {}
+    }, 45_000).unref()
     return true
   })
   handle('account:browse', async (userId: number, startUrl?: string) => {
@@ -451,7 +489,7 @@ function registerIpc(): void {
       }
     }
     if (store.get().autoTile) {
-      setTimeout(() => void system.tileWindows(), 12_000)
+      setTimeout(() => void system.tileWindows().catch(() => undefined), 12_000).unref()
     }
     return failed
   })
@@ -547,7 +585,7 @@ function registerIpc(): void {
   handle('system:killBackground', () => system.killBackground(), false)
   handle('system:accessibility', () => system.accessibilityGranted(), false)
   handle('system:requestAccessibility', () => system.requestAccessibility(), false)
-  handle('system:openExternal', (url: string) => shell.openExternal(url), false)
+  handle('system:openExternal', (url: string) => browser.openExternal(url), false)
   handle('system:openExtensions', async () => {
     const dir = await browser.extensionsPath(store.get().extensionsDir)
     await shell.openPath(dir)
@@ -650,13 +688,25 @@ function registerIpc(): void {
 }
 
 vault.onLock = () => {
-  send('vault:locked')
+  send('vault:locked', vault.status())
   if (presenceTimer) clearInterval(presenceTimer)
   if (syncTimer) clearInterval(syncTimer)
   if (syncDebounce) clearTimeout(syncDebounce)
 }
 
-app.whenReady().then(async () => {
+function survive(e: unknown): void {
+  try {
+    send('toast:warn', `Recovered from an internal error: ${e instanceof Error ? e.message : String(e)}`)
+  } catch {}
+}
+
+process.on('uncaughtException', survive)
+process.on('unhandledRejection', survive)
+
+if (primary) void start()
+
+async function start(): Promise<void> {
+  await app.whenReady()
   app.setAppUserModelId('com.trapram.app')
   nativeTheme.themeSource = store.get().theme
 
@@ -668,7 +718,7 @@ app.whenReady().then(async () => {
     startPresenceLoop()
     startRefreshLoop()
     startSyncLoop()
-    void refreshAccounts()
+    pollPresence()
     void backgroundSync()
   }
 
@@ -681,7 +731,7 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
-})
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
