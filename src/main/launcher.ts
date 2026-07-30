@@ -16,6 +16,7 @@ function remember(userId: number): void {
   const now = Date.now()
   launches.push({ userId, at: now })
   while (launches.length > 32 || (launches.length > 0 && now - launches[0].at > 1_800_000)) launches.shift()
+  while (owners.size > 64) owners.delete(owners.keys().next().value as string)
 }
 
 export async function launch(

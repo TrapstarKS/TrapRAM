@@ -9,6 +9,9 @@ const run = promisify(execFile)
 
 const SEMAPHORE = '/RobloxPlayerUniq'
 const MAX_SLOTS = 8
+const RESERVE_MS = 30_000
+
+const reserved = new Map<number, number>()
 
 const instancesDir = (): string => join(app.getPath('userData'), 'instances')
 const slotDir = (i: number): string => join(instancesDir(), `slot-${i}`)
@@ -172,9 +175,18 @@ export async function launch(uri: string): Promise<number> {
   const source = await sourceBundle()
   const busy = await runningCommands()
 
+  const now = Date.now()
+  for (const [slot, at] of reserved) if (now - at > RESERVE_MS) reserved.delete(slot)
+
   let index = 0
-  while (index < MAX_SLOTS && busy.includes(`${slotDir(index)}/Roblox.app/Contents/MacOS/RobloxPlayer`)) index++
+  while (
+    index < MAX_SLOTS &&
+    (reserved.has(index) || busy.includes(`${slotDir(index)}/Roblox.app/Contents/MacOS/RobloxPlayer`))
+  ) {
+    index++
+  }
   if (index === MAX_SLOTS) throw new Error(`All ${MAX_SLOTS} client slots are in use`)
+  reserved.set(index, now)
 
   const bundle = (await slotIsCurrent(index, source))
     ? join(slotDir(index), 'Roblox.app')

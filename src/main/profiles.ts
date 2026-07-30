@@ -3,9 +3,11 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
-import { sanitizeAppStorage } from '@shared/pure'
+import { sanitizeAppStorage, gate } from '@shared/pure'
 import { isWin } from './launcher'
 import { processes } from './system'
+
+const swaps = gate()
 
 interface Slot {
   live: string
@@ -79,6 +81,8 @@ async function seed(userId: number): Promise<void> {
 
 async function restore(userId: number): Promise<void> {
   const dir = profileDir(userId)
+  await fs.mkdir(join(activeFile(), '..'), { recursive: true })
+  await fs.writeFile(activeFile(), String(userId))
   for (const slot of slots()) {
     const source = join(dir, slot.name)
     try {
@@ -86,7 +90,6 @@ async function restore(userId: number): Promise<void> {
       await fs.copyFile(source, slot.live)
     } catch {}
   }
-  await fs.writeFile(activeFile(), String(userId))
 }
 
 export interface SwapResult {
@@ -95,23 +98,27 @@ export interface SwapResult {
 }
 
 export async function activate(userId: number): Promise<SwapResult> {
-  const active = await readActive()
-  if (active === userId) return { swapped: false, reason: 'already-active' }
-  if ((await processes()).length > 0) return { swapped: false, reason: 'client-running' }
+  return swaps(async () => {
+    const active = await readActive()
+    if (active === userId) return { swapped: false, reason: 'already-active' }
+    if ((await processes()).length > 0) return { swapped: false, reason: 'client-running' }
 
-  if (active !== null) await stash(active)
+    if (active !== null) await stash(active)
 
-  try {
-    await fs.access(join(profileDir(userId), 'appStorage.json'))
-  } catch {
-    await seed(userId)
-  }
+    try {
+      await fs.access(join(profileDir(userId), 'appStorage.json'))
+    } catch {
+      await seed(userId)
+    }
 
-  await restore(userId)
-  return { swapped: true }
+    await restore(userId)
+    return { swapped: true }
+  })
 }
 
 export async function forget(userId: number): Promise<void> {
-  await fs.rm(profileDir(userId), { recursive: true, force: true })
-  if ((await readActive()) === userId) await fs.rm(activeFile(), { force: true })
+  return swaps(async () => {
+    await fs.rm(profileDir(userId), { recursive: true, force: true })
+    if ((await readActive()) === userId) await fs.rm(activeFile(), { force: true })
+  })
 }
