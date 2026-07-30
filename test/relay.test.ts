@@ -84,3 +84,22 @@ test('rooms are not browsable', async () => {
   assert.equal((await worker.fetch(new Request('https://relay.test/admin'), e)).status, 404)
   assert.equal((await worker.fetch(new Request(URL_BASE, { method: 'POST', body: 'x' }), e)).status, 405)
 })
+
+test('a PUT with no version header cannot seed an empty room either', async () => {
+  const e = env()
+  const res = await worker.fetch(new Request(URL_BASE, { method: 'PUT', body: 'aGVsbG8=' }), e)
+  assert.equal(res.status, 409)
+  assert.equal(await e.SYNC.get(`r:${ROOM}`), null)
+})
+
+test('a junk version header is refused rather than coerced to zero', async () => {
+  const e = env()
+  for (const claimed of ['', ' ', 'abc', '0x0', '1.0', '-0']) {
+    const res = await worker.fetch(
+      new Request(URL_BASE, { method: 'PUT', body: 'aGVsbG8=', headers: { 'if-match': claimed } }),
+      e
+    )
+    assert.equal(res.status, 409, `if-match: "${claimed}" was accepted`)
+  }
+  assert.equal(await e.SYNC.get(`r:${ROOM}`), null)
+})

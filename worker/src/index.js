@@ -36,7 +36,10 @@ export default {
       const record = await env.SYNC.get(key, 'json')
       const current = record?.v ?? 0
 
-      if (Number(request.headers.get('if-match')) !== current) return new Response(null, { status: 409 })
+      const claimed = request.headers.get('if-match')
+      if (claimed === null || !/^\d+$/.test(claimed) || Number(claimed) !== current) {
+        return new Response(null, { status: 409 })
+      }
 
       const next = { v: current + 1, blob }
       await env.SYNC.put(key, JSON.stringify(next), { expirationTtl: TTL_SECONDS })
