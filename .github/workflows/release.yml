@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   prepare:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -20,6 +21,7 @@ jobs:
 
   build:
     needs: prepare
+    if: always() && needs.prepare.result != 'failure' && needs.prepare.result != 'cancelled'
     strategy:
       fail-fast: false
       matrix:
@@ -66,19 +68,18 @@ jobs:
           security find-identity -v "$KEYCHAIN"
 
       - run: npx electron-vite build
-      - run: npx electron-builder ${{ matrix.flag }} --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: true
 
       - name: Refuse to ship a macOS build that cannot auto-update
         if: matrix.os == 'macos-latest'
         env:
           FINGERPRINT: 0a15f0539b0f02a8d880e637b0c2744f1f0b5dfb
         run: |
+          npx electron-builder --mac --dir
           status=0
+          found=0
           for app in dist/mac*/TrapRAM.app; do
             [ -d "$app" ] || continue
+            found=1
             echo "== $app"
             codesign --verify --strict --verbose=1 "$app" || status=1
             requirement=$(codesign -d -r- "$app" 2>&1 | sed -n 's/^# designated => //p')
@@ -91,10 +92,17 @@ jobs:
                 ;;
             esac
           done
+          [ "$found" = 1 ] || { echo "no packaged app to check"; status=1; }
           exit $status
+
+      - run: npx electron-builder ${{ matrix.flag }} --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: true
 
   tidy:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
