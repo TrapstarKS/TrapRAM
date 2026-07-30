@@ -38,10 +38,60 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+      - name: Trust the signing certificate
+        if: matrix.os == 'macos-latest'
+        env:
+          CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "MAC_CERT_P12 is not set — refusing to publish a macOS build that cannot auto-update."
+            exit 1
+          fi
+          echo "$CERT_P12" | base64 --decode > /tmp/signing.p12
+          openssl pkcs12 -in /tmp/signing.p12 -clcerts -nokeys -out /tmp/signing.pem \
+            -passin "pass:$CERT_PASSWORD" -legacy
+          sudo security add-trusted-cert -d -r trustRoot \
+            -k /Library/Keychains/System.keychain /tmp/signing.pem
+          KEYCHAIN=/tmp/build.keychain
+          security create-keychain -p runner "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p runner "$KEYCHAIN"
+          security set-keychain-settings "$KEYCHAIN"
+          security import /tmp/signing.p12 -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k runner "$KEYCHAIN"
+          rm -f /tmp/signing.p12 /tmp/signing.pem
+          security find-identity -v "$KEYCHAIN"
+
       - run: npx electron-vite build
       - run: npx electron-builder ${{ matrix.flag }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: true
+
+      - name: Refuse to ship a macOS build that cannot auto-update
+        if: matrix.os == 'macos-latest'
+        env:
+          FINGERPRINT: 0a15f0539b0f02a8d880e637b0c2744f1f0b5dfb
+        run: |
+          status=0
+          for app in dist/mac*/TrapRAM.app; do
+            [ -d "$app" ] || continue
+            echo "== $app"
+            codesign --verify --strict --verbose=1 "$app" || status=1
+            requirement=$(codesign -d -r- "$app" 2>&1 | sed -n 's/^# designated => //p')
+            echo "   $requirement"
+            case "$requirement" in
+              *"certificate leaf = H\"$FINGERPRINT\""*) ;;
+              *)
+                echo "   NOT signed with the release certificate — Squirrel.Mac would reject every update."
+                status=1
+                ;;
+            esac
+          done
+          exit $status
 
   tidy:
     needs: build
