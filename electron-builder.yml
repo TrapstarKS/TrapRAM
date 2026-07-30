@@ -1,0 +1,51 @@
+appId: com.trapram.app
+productName: TrapRAM
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+asar: true
+
+publish:
+  provider: github
+  owner: TrapstarKS
+  repo: TrapRAM
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.utilities
+  extraResources:
+    - from: build/mac/trapram-semunlink
+      to: trapram-semunlink
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  darkModeSupport: true
+  identity: "-"
+  notarize: false
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSAppleEventsUsageDescription: TrapRAM arranges Roblox windows on your screen.
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+  requestedExecutionLevel: asInvoker
+
+dmg:
+  writeUpdateInfo: false
+
+nsis:
+  differentialPackage: false
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false

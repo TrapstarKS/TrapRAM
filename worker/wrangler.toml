@@ -1,0 +1,6 @@
+name = "trapram-relay"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+[[kv_namespaces]]
+binding = "SYNC"
+id = ""

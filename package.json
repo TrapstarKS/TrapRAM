@@ -1,0 +1,40 @@
+{
+  "name": "trapram",
+  "productName": "TrapRAM",
+  "version": "1.0.1",
+  "description": "Roblox account manager",
+  "main": "out/main/index.js",
+  "author": "TrapstarKS",
+  "license": "MIT",
+  "private": true,
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.ts",
+    "pack:mac": "electron-vite build && electron-builder --mac",
+    "pack:win": "electron-vite build && electron-builder --win",
+    "pack": "electron-vite build && electron-builder --mac --win"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.6.0",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.0",
+    "lucide-react": "^0.526.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "zustand": "^5.0.6"
+  }
+}
