@@ -9,16 +9,27 @@ import * as roblox from './roblox'
 export const isWin = process.platform === 'win32'
 export const isMac = process.platform === 'darwin'
 
-export async function launch(cookie: string, target: LaunchTarget, multiInstance = false): Promise<void> {
+export const owners = new Map<string, number>()
+
+export async function launch(
+  cookie: string,
+  target: LaunchTarget,
+  multiInstance = false,
+  userId = 0
+): Promise<void> {
   const ticket = await roblox.authTicket(cookie)
   const tracker = Math.floor(Math.random() * 1e9)
   const uri = buildUri(ticket, target, tracker, Date.now())
 
+  if (userId) owners.set(`b:${tracker}`, userId)
+
   if (isMac && multiInstance) {
     const macmulti = await import('./macmulti')
-    await macmulti.launch(uri)
+    const slot = await macmulti.launch(uri)
+    if (userId) owners.set(`slot:${slot}`, userId)
     return
   }
+  if (userId && isMac) owners.set('app', userId)
   await shell.openExternal(uri)
 }
 

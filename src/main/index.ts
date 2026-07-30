@@ -289,6 +289,12 @@ async function throttle(): Promise<void> {
   lastLaunchAt = Date.now()
 }
 
+async function enableMultiInstance(): Promise<void> {
+  if (!launcher.isWin) return
+  if (await system.killBackground().catch(() => 0)) await new Promise((r) => setTimeout(r, 600))
+  await launcher.setMultiInstance(true)
+}
+
 async function launchOne(userId: number, target: LaunchTarget): Promise<void> {
   const s = store.get()
   if (s.isolateProfiles) {
@@ -300,10 +306,10 @@ async function launchOne(userId: number, target: LaunchTarget): Promise<void> {
   if (s.privacyMode) await launcher.clearTrackingCookies()
 
   if (s.multiInstance && launcher.isWin) {
-    await launcher.setMultiInstance(true).catch((e: Error) => send('toast:warn', e.message))
+    await enableMultiInstance().catch((e: Error) => send('toast:warn', e.message))
   }
   await throttle()
-  await launcher.launch(vault.cookie(userId), target, s.multiInstance)
+  await launcher.launch(vault.cookie(userId), target, s.multiInstance, userId)
   const acc = vault.read().accounts.find((a) => a.userId === userId)
   if (acc) {
     acc.lastLaunch = new Date().toISOString()
@@ -518,7 +524,10 @@ function registerIpc(): void {
       startTraySweep()
       if (next.killTrayProcesses) void system.killBackground().catch(() => undefined)
     }
-    if (patch.multiInstance !== undefined && launcher.isWin) await launcher.setMultiInstance(next.multiInstance)
+    if (patch.multiInstance !== undefined && launcher.isWin) {
+      if (next.multiInstance) await enableMultiInstance()
+      else await launcher.setMultiInstance(false)
+    }
     if (patch.openAtLogin !== undefined) {
       app.setLoginItemSettings({ openAtLogin: next.openAtLogin })
 
@@ -664,7 +673,7 @@ app.whenReady().then(async () => {
   }
 
   if (store.get().multiInstance) {
-    launcher.setMultiInstance(true).catch((e: Error) => send('toast:warn', e.message))
+    void enableMultiInstance().catch((e: Error) => send('toast:warn', e.message))
   }
   startTraySweep()
   createWindow()

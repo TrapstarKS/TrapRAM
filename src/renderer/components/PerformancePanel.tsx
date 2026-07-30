@@ -11,6 +11,7 @@ interface Proc {
   uptimeSec: number
   priority: string
   background: boolean
+  userId?: number
 }
 
 interface FlagPreset {
@@ -117,7 +118,7 @@ function AppliedFlags({
 }
 
 export default function PerformancePanel() {
-  const { run, toast, settings, patchSettings } = useStore()
+  const { run, toast, settings, patchSettings, accounts } = useStore()
   const [procs, setProcs] = useState<Proc[]>([])
   const [picked, setPicked] = useState<number[]>([])
   const [win, setWin] = useState(false)
@@ -158,6 +159,13 @@ export default function PerformancePanel() {
   const targets = picked.length ? picked : procs.map((p) => p.pid)
   const totalMem = procs.reduce((n, p) => n + p.memoryMb, 0)
   const background = procs.filter((p) => p.background).length
+
+  const nameOf = (userId?: number) => {
+    if (!userId) return null
+    const a = accounts.find((x) => x.userId === userId)
+    if (!a) return null
+    return settings?.anonymize ? `#${String(a.userId).slice(-4)}` : a.alias || a.username
+  }
 
   async function tile() {
     const res = await run('Arranging windows', () =>
@@ -271,6 +279,9 @@ export default function PerformancePanel() {
                       {p.pid}
                     </span>
                     <span className="min-w-0 flex-1">
+                      <span className="mb-1 block truncate text-[12px] font-semibold">
+                        {nameOf(p.userId) ?? <span className="text-[var(--color-faint)]">Unknown account</span>}
+                      </span>
                       <span className="mb-1 block h-1 w-full max-w-[220px] overflow-hidden rounded-full bg-[var(--color-bg-deep)]">
                         <span
                           className="block h-full rounded-full transition-[width] duration-500 ease-[var(--ease-out)]"

@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import { cpus } from 'node:os'
 import { systemPreferences, screen } from 'electron'
 import { grid, parseEtime } from '@shared/pure'
-import { isWin } from './launcher'
+import { isWin, owners } from './launcher'
 
 const run = promisify(execFile)
 
@@ -14,6 +14,11 @@ export interface RobloxProcess {
   uptimeSec: number
   priority: string
   background: boolean
+  userId?: number
+}
+
+function ownerOf(key: string): number | undefined {
+  return owners.get(key)
 }
 
 const cpuSamples = new Map<number, { seconds: number; at: number }>()
@@ -74,14 +79,19 @@ export async function processes(): Promise<RobloxProcess[]> {
     const live = new Set(list.map((p) => p.pid))
     for (const pid of cpuSamples.keys()) if (!live.has(pid)) cpuSamples.delete(pid)
 
-    return list.map((p) => ({
-      pid: p.pid,
-      memoryMb: Math.round(p.mem / 1048576),
-      cpu: cpuPercent(p.pid, p.cpu ?? 0, p.start ?? 0),
-      uptimeSec: p.start ?? 0,
-      priority: p.prio ?? 'Normal',
-      background: (p.cmd ?? '').includes('--launch-to-tray')
-    }))
+    return list.map((p) => {
+      const cmd = p.cmd ?? ''
+      const tracker = /-b\s+(\d+)/.exec(cmd)
+      return {
+        pid: p.pid,
+        memoryMb: Math.round(p.mem / 1048576),
+        cpu: cpuPercent(p.pid, p.cpu ?? 0, p.start ?? 0),
+        uptimeSec: p.start ?? 0,
+        priority: p.prio ?? 'Normal',
+        background: cmd.includes('--launch-to-tray'),
+        userId: tracker ? ownerOf(`b:${tracker[1]}`) : undefined
+      }
+    })
   }
 
   const { stdout } = await run('/bin/ps', ['-axo', 'pid=,rss=,time=,etime=,nice=,comm='], {
@@ -97,6 +107,7 @@ export async function processes(): Promise<RobloxProcess[]> {
     const pid = Number(m[1])
     const nice = Number(m[5])
     const uptimeSec = parseEtime(m[4])
+    const slot = /\/instances\/slot-(\d+)\//.exec(m[6])
     live.add(pid)
     out.push({
       pid,
@@ -104,7 +115,8 @@ export async function processes(): Promise<RobloxProcess[]> {
       cpu: cpuPercent(pid, parseEtime(m[3]), uptimeSec),
       uptimeSec,
       priority: nice < 0 ? 'High' : nice > 5 ? 'Low' : nice > 0 ? 'BelowNormal' : 'Normal',
-      background: false
+      background: false,
+      userId: slot ? ownerOf(`slot:${slot[1]}`) : ownerOf('app')
     })
   }
   for (const pid of cpuSamples.keys()) if (!live.has(pid)) cpuSamples.delete(pid)

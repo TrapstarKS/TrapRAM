@@ -168,7 +168,7 @@ async function syncSettings(source: string, bundle: string): Promise<void> {
   await run('/bin/cp', ['-a', from, to]).catch(() => undefined)
 }
 
-export async function launch(uri: string): Promise<void> {
+export async function launch(uri: string): Promise<number> {
   const source = await sourceBundle()
   const busy = await runningCommands()
 
@@ -184,6 +184,7 @@ export async function launch(uri: string): Promise<void> {
   await releaseSemaphore()
   await run('/usr/bin/open', ['-a', bundle, uri])
   await releaseSemaphore()
+  return index
 }
 
 export async function reset(): Promise<void> {
