@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Shield, Plus, Trash2, Play } from 'lucide-react'
+import { Shield, Plus, Trash2, Play, Pencil } from 'lucide-react'
 import type { PrivateServer } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -11,6 +11,9 @@ export default function PrivateServersPanel() {
   const [name, setName] = useState('')
   const [link, setLink] = useState('')
   const [saving, setSaving] = useState(false)
+  const [editing, setEditing] = useState<PrivateServer | null>(null)
+  const [editName, setEditName] = useState('')
+  const [renaming, setRenaming] = useState(false)
 
   const usable = accounts.filter((a) => selected.includes(a.userId) && !a.cookieExpired)
 
@@ -49,6 +52,22 @@ export default function PrivateServersPanel() {
     setOpen(false)
     setName('')
     setLink('')
+  }
+
+  function startEdit(s: PrivateServer) {
+    setEditing(s)
+    setEditName(s.name)
+  }
+
+  async function rename() {
+    if (!editing) return
+    const trimmed = editName.trim()
+    if (!trimmed) return toast('err', 'Name can’t be empty')
+
+    setRenaming(true)
+    await run('Saving', () => api.call('server:save', { ...editing, name: trimmed }), 'Renamed')
+    setRenaming(false)
+    setEditing(null)
   }
 
   async function join(s: PrivateServer) {
@@ -104,6 +123,13 @@ export default function PrivateServersPanel() {
                   Join
                 </Button>
                 <Button
+                  className="!h-[28px] !w-[28px] !px-0"
+                  aria-label={`Rename ${s.name}`}
+                  onClick={() => startEdit(s)}
+                >
+                  <Pencil size={13} strokeWidth={1.75} />
+                </Button>
+                <Button
                   variant="danger"
                   className="!h-[28px] !w-[28px] !px-0"
                   aria-label={`Delete ${s.name}`}
@@ -146,6 +172,31 @@ export default function PrivateServersPanel() {
               spellCheck={false}
             />
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!editing}
+        title="Rename private server"
+        onClose={() => setEditing(null)}
+        footer={
+          <>
+            <Button onClick={() => setEditing(null)}>Cancel</Button>
+            <Button variant="primary" loading={renaming} onClick={() => void rename()}>
+              Save
+            </Button>
+          </>
+        }
+      >
+        <div>
+          <Label>Name</Label>
+          <Input
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="Friends only"
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && void rename()}
+          />
         </div>
       </Modal>
     </div>
