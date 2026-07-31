@@ -18,3 +18,22 @@ export function quickCode(raw: string): string | null {
 
 export const editTargets = (userId: number, selected: number[]): number[] =>
   selected.length > 1 && selected.includes(userId) ? selected : [userId]
+
+export type BulkLine = { kind: 'cookie'; value: string } | { kind: 'credential'; username: string; password: string }
+
+export function parseBulkLines(raw: string): BulkLine[] {
+  const lines: BulkLine[] = []
+  for (const line of raw.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const i = line.indexOf(':')
+    if (line.length <= 100 && i > 0) {
+      const username = line.slice(0, i).trim()
+      const password = line.slice(i + 1).trim()
+      if (username && password) {
+        lines.push({ kind: 'credential', username, password })
+        continue
+      }
+    }
+    lines.push({ kind: 'cookie', value: line })
+  }
+  return lines
+}

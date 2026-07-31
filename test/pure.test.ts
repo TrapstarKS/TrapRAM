@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { randomBytes } from 'node:crypto'
 import { seal, open, buildUri, grid, sanitizeAppStorage, parseEtime, mergeVault, fingerprint, shareable, newSyncKey, normalizeSyncKey, formatSyncKey, deriveSync, claimOwners, gate, realPids, groupsOf, groupColor, regionMismatch } from '../src/shared/pure.ts'
-import { reorderIds, editTargets, quickCode, utcMillis } from '../src/shared/plain.ts'
+import { reorderIds, editTargets, quickCode, utcMillis, parseBulkLines } from '../src/shared/plain.ts'
 import type { Account, SyncPayload } from '../src/shared/types.ts'
 
 const NOW = Date.parse('2026-07-30T12:00:00Z')
@@ -237,6 +237,17 @@ test('a Roblox timestamp with no zone is read as UTC, not as local time', () => 
   assert.equal(utcMillis('2026-07-31T03:21:27Z'), Date.parse('2026-07-31T03:21:27Z'))
   assert.equal(utcMillis('2026-07-31T03:21:27+00:00'), Date.parse('2026-07-31T03:21:27Z'))
   assert.equal(utcMillis('2026-07-31T00:21:27-03:00'), Date.parse('2026-07-31T03:21:27Z'))
+})
+
+test('bulk paste tells a session cookie apart from a username:password line', () => {
+  const cookie = '_|WARNING:-DO-NOT-SHARE-THIS.' + 'A'.repeat(200)
+  const lines = parseBulkLines(`${cookie}\nspeedy:hunter2\n  \nbadline:\n`)
+  assert.deepEqual(lines, [
+    { kind: 'cookie', value: cookie },
+    { kind: 'credential', username: 'speedy', password: 'hunter2' },
+    { kind: 'cookie', value: 'badline:' }
+  ])
+  assert.deepEqual(parseBulkLines(''), [])
 })
 
 test('an edit reaches every selected account, not just the row it opened from', () => {

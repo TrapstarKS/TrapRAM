@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import fs from 'node:fs/promises'
 
-const LOGIN_URL = 'https://www.roblox.com/login'
+const LOGIN_URL = 'https://www.roblox.com'
+const SIGNIN_URL = 'https://www.roblox.com/login'
 const HOME_URL = 'https://www.roblox.com/home'
 const TOOLBAR_H = 46
 
@@ -64,7 +65,55 @@ function guardNavigation(view: { webContents: Electron.WebContents }): void {
 
 const LOGIN_POSTS = ['https://auth.roblox.com/v2/login', 'https://auth.roblox.com/v2/signup']
 
-export async function openLogin(parent?: BrowserWindow): Promise<{ cookie: string; password: string } | null> {
+function fillScript(username: string, password: string): string {
+  return `(() => {
+    function set(obj, cb) {
+      if (!obj) return
+      cb(obj)
+      for (const [k, v] of Object.entries(obj)) {
+        if (k.includes('reactProps') && v && v.onChange) {
+          v.onChange({ target: obj, nativeEvent: { inputType: 'insertText' } })
+        }
+      }
+    }
+
+    let tries = 0
+    function tick() {
+      const user = document.querySelector('#login-username, input[name="username"]')
+      const pass = document.querySelector('#login-password, input[name="password"]')
+      if (user && pass) {
+        set(user, (o) => { o.value = ${JSON.stringify(username)} })
+        set(pass, (o) => { o.value = ${JSON.stringify(password)} })
+        console.log('[TrapRAM] filled username + password')
+        setTimeout(submit, 300)
+        return
+      }
+      if (++tries < 150) setTimeout(tick, 200)
+      else console.log('[TrapRAM] ABORT: fields never appeared')
+    }
+
+    let subTries = 0
+    function submit() {
+      const btn = document.getElementById('login-button')
+      if (!btn || btn.disabled) {
+        if (++subTries < 30) return setTimeout(submit, 1000)
+        console.log('[TrapRAM] ABORT: login button never became enabled')
+        return
+      }
+      console.log('[TrapRAM] clicking login button')
+      btn.click()
+    }
+
+    tick()
+  })()`
+}
+
+export async function openLogin(
+  parent?: BrowserWindow,
+  prefill?: { username: string; password: string },
+  bounds?: { x: number; y: number; width?: number; height?: number },
+  injectJs?: string
+): Promise<{ cookie: string; password: string } | null> {
   const partition = `trapram-login-${randomUUID()}`
   const ses = session.fromPartition(partition)
   harden(ses)
@@ -72,7 +121,7 @@ export async function openLogin(parent?: BrowserWindow): Promise<{ cookie: strin
 
   let password = ''
   ses.webRequest.onBeforeRequest({ urls: LOGIN_POSTS }, (details, cb) => {
-    const raw = details.uploadData?.[0]?.bytes?.toString('utf8')
+    const raw = details.uploadData?.map((d) => d.bytes?.toString('utf8') ?? '').join('')
     if (raw) {
       try {
         const typed = (JSON.parse(raw) as { password?: unknown }).password
@@ -85,14 +134,27 @@ export async function openLogin(parent?: BrowserWindow): Promise<{ cookie: strin
   const win = new BrowserWindow({
     width: 520,
     height: 760,
+    ...bounds,
     parent,
     modal: false,
-    title: 'Sign in to Roblox',
+    title: prefill ? `Sign in — ${prefill.username}` : 'Sign in to Roblox',
     backgroundColor: '#0c0d12',
     autoHideMenuBar: true,
     webPreferences: { partition, contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false }
   })
   guardNavigation(win)
+
+  if (prefill) {
+    win.webContents.on('dom-ready', () => {
+      void win.webContents.executeJavaScript(fillScript(prefill.username, prefill.password)).catch(() => undefined)
+    })
+  }
+
+  if (injectJs) {
+    win.webContents.on('dom-ready', () => {
+      void win.webContents.executeJavaScript(injectJs).catch(() => undefined)
+    })
+  }
 
   return new Promise<{ cookie: string; password: string } | null>((resolve) => {
     let settled = false
@@ -116,7 +178,7 @@ export async function openLogin(parent?: BrowserWindow): Promise<{ cookie: strin
     })
     win.webContents.on('did-navigate', () => void check())
     win.on('closed', () => finish(null))
-    void win.loadURL(LOGIN_URL).catch(() => finish(null))
+    void win.loadURL(prefill ? SIGNIN_URL : LOGIN_URL).catch(() => finish(null))
   })
 }
 

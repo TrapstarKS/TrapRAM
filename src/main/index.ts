@@ -1,9 +1,18 @@
-import { app, BrowserWindow, ipcMain, shell, dialog, clipboard, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog, clipboard, nativeTheme, screen } from 'electron'
 import { join } from 'node:path'
 import fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import type { Account, LaunchTarget, Preset, PrivateServer, Settings, SyncState } from '@shared/types'
-import { gate, groupsOf, regionMismatch } from '@shared/pure'
+import type {
+  Account,
+  BulkImportResult,
+  BulkLoginResult,
+  LaunchTarget,
+  Preset,
+  PrivateServer,
+  Settings,
+  SyncState
+} from '@shared/types'
+import { gate, grid, groupsOf, regionMismatch } from '@shared/pure'
 import { Vault } from './vault'
 import * as roblox from './roblox'
 import * as region from './region'
@@ -276,6 +285,12 @@ function startPresenceLoop(): void {
   presenceTimer.unref()
 }
 
+function validSession(username: string): Account | undefined {
+  const d = vault.read()
+  const acc = d.accounts.find((a) => a.username.toLowerCase() === username.toLowerCase())
+  return acc && !acc.cookieExpired && d.cookies[String(acc.userId)] ? acc : undefined
+}
+
 async function addFromCookie(cookie: string, password?: string): Promise<Account> {
   const info = await roblox.validate(cookie)
   const home = await region.current()
@@ -445,6 +460,21 @@ function registerIpc(): void {
     if (!res) return null
     return addFromCookie(res.cookie, res.password)
   })
+  handle('account:bulkImportCookies', async (cookies: string[]) => {
+    const results: BulkImportResult[] = []
+    for (const raw of cookies.slice(0, 50)) {
+      const cookie = raw.trim()
+      if (!cookie) continue
+      try {
+        const acc = await addFromCookie(cookie)
+        results.push({ ok: true, username: acc.username, account: acc })
+      } catch (e) {
+        results.push({ ok: false, error: e instanceof Error ? e.message : String(e) })
+      }
+    }
+    pushData()
+    return results
+  })
   handle('account:remove', async (userId: number) => {
     await vault.mutate((d) => {
       d.accounts = d.accounts.filter((a) => a.userId !== userId)
@@ -520,6 +550,65 @@ function registerIpc(): void {
     if (s.status !== 'Validated') return { ...seen, account: null }
     const cookie = await roblox.redeemLoginCode(code, privateKey)
     return { ...seen, account: await addFromCookie(cookie) }
+  })
+  handle('login:bulkOpen', (creds: { username?: string; password?: string }[], injectJs?: string, concurrency?: number) => {
+    const batch = creds
+    const area = screen.getPrimaryDisplay().workArea
+    const slots = Math.max(1, Math.min(concurrency ?? batch.length, batch.length))
+    const cells = grid(slots, area.width, area.height, area.x, area.y)
+
+    let next = 0
+    const runSlot = async (slot: number): Promise<void> => {
+      if (next >= batch.length) return
+      const i = next++
+      const cred = batch[i]
+
+      const already = cred.username ? validSession(cred.username) : undefined
+      if (already) {
+        send('bulkLogin:result', {
+          index: i,
+          username: already.username,
+          ok: true,
+          skipped: true,
+          account: already
+        } as BulkLoginResult)
+        return runSlot(slot)
+      }
+
+      const c = cells[slot]
+      const bounds = { x: c.x, y: c.y, width: c.w, height: c.h }
+      const prefill = cred.username && cred.password ? { username: cred.username, password: cred.password } : undefined
+      const res = await browser.openLogin(main ?? undefined, prefill, bounds, injectJs).catch(() => null)
+      if (!res) {
+        send('bulkLogin:result', {
+          index: i,
+          username: cred.username,
+          ok: false,
+          error: 'Window closed before signing in'
+        } as BulkLoginResult)
+      } else {
+        try {
+          const acc = await addFromCookie(res.cookie, res.password || undefined)
+          send('bulkLogin:result', {
+            index: i,
+            username: cred.username ?? acc.username,
+            ok: true,
+            account: acc
+          } as BulkLoginResult)
+        } catch (e) {
+          send('bulkLogin:result', {
+            index: i,
+            username: cred.username,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e)
+          } as BulkLoginResult)
+        }
+      }
+      return runSlot(slot)
+    }
+
+    for (let slot = 0; slot < slots; slot++) void runSlot(slot)
+    return batch.length
   })
   handle('account:quickLoginCode', (userId: number, code: string) =>
     roblox.quickLoginCode(vault.cookie(userId), code)

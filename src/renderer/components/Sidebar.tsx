@@ -19,13 +19,17 @@ import {
   TimerReset,
   AtSign,
   Lock,
-  LogIn
+  LogIn,
+  ListPlus,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react'
-import type { Account } from '@shared/types'
-import { reorderIds, editTargets, quickCode, utcMillis } from '@shared/plain'
+import type { Account, BulkImportResult, BulkLoginResult } from '@shared/types'
+import { reorderIds, editTargets, quickCode, utcMillis, parseBulkLines, type BulkLine } from '@shared/plain'
 import { useStore, visibleAccounts } from '../store'
 import { api, presenceColor, presenceLabel, relative } from '../lib/api'
-import { Button, IconButton, Input, Label, Modal, Empty } from './ui'
+import { Button, IconButton, Input, Label, Modal, Empty, Switch } from './ui'
 
 export default function Sidebar() {
   const store = useStore()
@@ -33,6 +37,8 @@ export default function Sidebar() {
   const list = visibleAccounts(store)
   const [addOpen, setAddOpen] = useState(false)
   const [cookieOpen, setCookieOpen] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [multiOpen, setMultiOpen] = useState(false)
   const [deviceOpen, setDeviceOpen] = useState(false)
   const [editing, setEditing] = useState<Account | null>(null)
   const [quickFor, setQuickFor] = useState<Account | null>(null)
@@ -232,8 +238,15 @@ export default function Sidebar() {
           <BigChoice
             icon={<Globe size={17} strokeWidth={1.75} />}
             title="Sign in with the built-in browser"
-            hint="Opens an isolated, throwaway Chromium session. TrapRAM reads the session cookie and the password you type, keeps both in the encrypted vault, and wipes the window."
-            onClick={() => void addByLogin()}
+            hint="Opens an isolated, throwaway Chromium session. TrapRAM reads the session cookie and the password you type, keeps both in the encrypted vault, and wipes the window. Shift+click to open several at once."
+            onClick={(e) => {
+              if (e.shiftKey) {
+                setAddOpen(false)
+                setMultiOpen(true)
+              } else {
+                void addByLogin()
+              }
+            }}
           />
           <BigChoice
             icon={<QrCode size={17} strokeWidth={1.75} />}
@@ -253,10 +266,21 @@ export default function Sidebar() {
               setCookieOpen(true)
             }}
           />
+          <BigChoice
+            icon={<ListPlus size={17} strokeWidth={1.75} />}
+            title="Bulk import"
+            hint="Paste a list — one cookie or one username:password per line."
+            onClick={() => {
+              setAddOpen(false)
+              setBulkOpen(true)
+            }}
+          />
         </div>
       </Modal>
 
       <CookieModal open={cookieOpen} onClose={() => setCookieOpen(false)} />
+      <BulkImportModal open={bulkOpen} onClose={() => setBulkOpen(false)} />
+      <MultiLoginModal open={multiOpen} onClose={() => setMultiOpen(false)} />
       <DeviceLoginModal open={deviceOpen} onClose={() => setDeviceOpen(false)} />
       <EditModal account={editing} onClose={() => setEditing(null)} />
       <QuickLoginModal account={quickFor} onClose={() => setQuickFor(null)} />
@@ -345,7 +369,7 @@ function BigChoice({
   icon: React.ReactNode
   title: string
   hint: string
-  onClick: () => void
+  onClick: (e: React.MouseEvent) => void
 }) {
   return (
     <button
@@ -515,6 +539,324 @@ function CookieModal({ open, onClose }: { open: boolean; onClose: () => void }) 
         onChange={(e) => setValue(e.target.value)}
         spellCheck={false}
       />
+    </Modal>
+  )
+}
+
+type BulkRow = { id: string; label: string; status: 'pending' | 'ok' | 'err'; detail?: string }
+
+function BulkImportModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { toast } = useStore()
+  const [text, setText] = useState('')
+  const [group, setGroup] = useState('')
+  const [rows, setRows] = useState<BulkRow[]>([])
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open) {
+      setText('')
+      setGroup('')
+      setRows([])
+    }
+  }, [open])
+
+  useEffect(
+    () =>
+      api.on('bulkLogin:result', (r: BulkLoginResult) => {
+        setRows((prev) =>
+          prev.map((row) =>
+            row.id === `cred:${r.index}`
+              ? {
+                  ...row,
+                  status: r.ok ? 'ok' : 'err',
+                  detail: r.ok
+                    ? r.skipped
+                      ? `Already signed in as ${r.account?.username}`
+                      : `Added ${r.account?.username}`
+                    : r.error
+                }
+              : row
+          )
+        )
+        if (r.ok && !r.skipped) toast('ok', `Added ${r.account?.username}`)
+        if (r.ok && r.account && group.trim()) void api.call('account:update', [r.account.userId], { group: group.trim() })
+      }),
+    [toast, group]
+  )
+
+  const parsed = parseBulkLines(text)
+  const cookieLines = parsed
+    .filter((l): l is Extract<BulkLine, { kind: 'cookie' }> => l.kind === 'cookie')
+    .slice(0, 50)
+  const credLines = parsed.filter((l): l is Extract<BulkLine, { kind: 'credential' }> => l.kind === 'credential')
+  const skipped = parsed.length - cookieLines.length - credLines.length
+
+  async function submit() {
+    setBusy(true)
+    setRows([
+      ...cookieLines.map((l, i) => ({ id: `cookie:${i}`, label: `Cookie #${i + 1}`, status: 'pending' as const })),
+      ...credLines.map((l, i) => ({ id: `cred:${i}`, label: l.username, status: 'pending' as const }))
+    ])
+
+    if (credLines.length) {
+      try {
+        await api.call(
+          'login:bulkOpen',
+          credLines.map((l) => ({ username: l.username, password: l.password })),
+          undefined,
+          5
+        )
+      } catch (e) {
+        toast('err', e instanceof Error ? e.message : String(e))
+      }
+    }
+
+    if (cookieLines.length) {
+      try {
+        const res = await api.call<BulkImportResult[]>(
+          'account:bulkImportCookies',
+          cookieLines.map((l) => l.value)
+        )
+        setRows((prev) => {
+          const next = [...prev]
+          res.forEach((r, i) => {
+            const idx = next.findIndex((row) => row.id === `cookie:${i}`)
+            if (idx < 0) return
+            next[idx] = {
+              ...next[idx],
+              label: r.username ?? next[idx].label,
+              status: r.ok ? 'ok' : 'err',
+              detail: r.ok ? `Added ${r.username}` : r.error
+            }
+          })
+          return next
+        })
+        if (group.trim()) {
+          const ids = res.filter((r) => r.ok && r.account).map((r) => r.account!.userId)
+          if (ids.length) await api.call('account:update', ids, { group: group.trim() })
+        }
+      } catch (e) {
+        toast('err', e instanceof Error ? e.message : String(e))
+      }
+    }
+    setBusy(false)
+    setText('')
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="Bulk import"
+      description="One per line. A long value is treated as a cookie; username:password opens a real sign-in window per line."
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Close</Button>
+          <Button
+            variant="primary"
+            loading={busy}
+            disabled={busy || (!cookieLines.length && !credLines.length)}
+            onClick={() => void submit()}
+          >
+            Import {parsed.length ? cookieLines.length + credLines.length : ''}
+          </Button>
+        </>
+      }
+    >
+      <textarea
+        aria-label="Accounts to import"
+        className="field h-[110px] resize-none py-2 font-mono text-[11px] leading-relaxed"
+        placeholder={'_|WARNING:-DO-NOT-SHARE-THIS…\nusername:password'}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        spellCheck={false}
+      />
+      {skipped > 0 && (
+        <p className="mt-1.5 text-[11px] text-[var(--color-faint)]">
+          {skipped} line{skipped === 1 ? '' : 's'} skipped — at most 50 cookies and 10 username:password logins at
+          once.
+        </p>
+      )}
+      <div className="mt-3">
+        <GroupField value={group} onChange={setGroup} hint="Every account this imports goes into this group." />
+      </div>
+      <StatusRows rows={rows} />
+    </Modal>
+  )
+}
+
+function GroupField({ value, onChange, hint }: { value: string; onChange: (v: string) => void; hint?: string }) {
+  const { groups } = useStore()
+  return (
+    <div>
+      <Label hint={hint}>Group</Label>
+      <Input value={value} onChange={(e) => onChange(e.target.value)} list="group-options" placeholder="Ungrouped" />
+      <datalist id="group-options">
+        {groups.map((g) => (
+          <option key={g.name} value={g.name} />
+        ))}
+      </datalist>
+    </div>
+  )
+}
+
+function StatusRows({ rows }: { rows: BulkRow[] }) {
+  if (!rows.length) return null
+  return (
+    <div className="mt-2.5 grid max-h-[168px] gap-1 overflow-y-auto">
+      {rows.map((row) => (
+        <div
+          key={row.id}
+          className="flex items-center gap-2 rounded-[6px] bg-[var(--color-raised)] px-2.5 py-1.5 text-[11.5px]"
+        >
+          {row.status === 'pending' ? (
+            <Loader2
+              aria-hidden="true"
+              size={13}
+              strokeWidth={1.75}
+              className="shrink-0 animate-spin text-[var(--color-faint)]"
+            />
+          ) : row.status === 'ok' ? (
+            <CheckCircle2
+              aria-hidden="true"
+              size={13}
+              strokeWidth={1.75}
+              className="shrink-0"
+              style={{ color: 'var(--color-ok)' }}
+            />
+          ) : (
+            <AlertTriangle
+              aria-hidden="true"
+              size={13}
+              strokeWidth={1.75}
+              className="shrink-0"
+              style={{ color: 'var(--color-bad)' }}
+            />
+          )}
+          <span className="min-w-0 flex-1 truncate">{row.label}</span>
+          {row.detail && (
+            <span className="max-w-[55%] shrink-0 truncate text-[var(--color-faint)]" title={row.detail}>
+              {row.detail}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MultiLoginModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { toast } = useStore()
+  const [count, setCount] = useState(2)
+  const [inject, setInject] = useState(false)
+  const [js, setJs] = useState('')
+  const [group, setGroup] = useState('')
+  const [rows, setRows] = useState<BulkRow[]>([])
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open) {
+      setRows([])
+      setBusy(false)
+      setInject(false)
+      setJs('')
+      setGroup('')
+    }
+  }, [open])
+
+  useEffect(
+    () =>
+      api.on('bulkLogin:result', (r: BulkLoginResult) => {
+        setRows((prev) =>
+          prev.map((row) =>
+            row.id === `win:${r.index}`
+              ? {
+                  ...row,
+                  label: r.username ?? row.label,
+                  status: r.ok ? 'ok' : 'err',
+                  detail: r.ok ? `Added ${r.account?.username}` : r.error
+                }
+              : row
+          )
+        )
+        if (r.ok) toast('ok', `Added ${r.account?.username}`)
+        if (r.ok && r.account && group.trim()) void api.call('account:update', [r.account.userId], { group: group.trim() })
+      }),
+    [toast, group]
+  )
+
+  async function submit() {
+    setBusy(true)
+    setRows(
+      Array.from({ length: count }, (_, i) => ({
+        id: `win:${i}`,
+        label: `Browser ${i + 1}`,
+        status: 'pending' as const
+      }))
+    )
+    try {
+      await api.call(
+        'login:bulkOpen',
+        Array.from({ length: count }, () => ({})),
+        inject ? js : undefined
+      )
+    } catch (e) {
+      toast('err', e instanceof Error ? e.message : String(e))
+    }
+    setBusy(false)
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="Open several sign-ins"
+      description="Opens that many blank sign-in windows, tiled like TrapRAM arranges game windows. Sign in to each by hand."
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Close</Button>
+          <Button variant="primary" loading={busy} disabled={busy} onClick={() => void submit()}>
+            Open {count}
+          </Button>
+        </>
+      }
+    >
+      <Label hint="Up to 10 at once.">Browsers to open</Label>
+      <Input
+        aria-label="Number of browsers to open"
+        type="number"
+        min={1}
+        max={10}
+        value={count}
+        onChange={(e) => setCount(Math.min(10, Math.max(1, Number(e.target.value) || 1)))}
+        className="!w-20"
+      />
+
+      <div className="mt-4">
+        <Switch
+          checked={inject}
+          onChange={setInject}
+          label="Inject JavaScript into each window"
+          hint="Runs in every window this opens, right as its page loads."
+        />
+      </div>
+
+      {inject && (
+        <textarea
+          aria-label="JavaScript to inject"
+          className="field mt-2 h-[110px] resize-none py-2 font-mono text-[11px] leading-relaxed"
+          placeholder="console.log('injected')"
+          value={js}
+          onChange={(e) => setJs(e.target.value)}
+          spellCheck={false}
+        />
+      )}
+
+      <div className="mt-4">
+        <GroupField value={group} onChange={setGroup} hint="Every account signed in here goes into this group." />
+      </div>
+
+      <StatusRows rows={rows} />
     </Modal>
   )
 }
@@ -721,7 +1063,7 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function EditModal({ account, onClose }: { account: Account | null; onClose: () => void }) {
-  const { run, groups, selected } = useStore()
+  const { run, selected } = useStore()
   const [alias, setAlias] = useState('')
   const [group, setGroup] = useState('')
   const [note, setNote] = useState('')
@@ -732,7 +1074,7 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
     setAlias(account.alias)
     setGroup(account.group)
     setNote(account.note)
-    setPassword(account.password ?? '')
+    setPassword(editTargets(account.userId, selected).length > 1 ? '' : (account.password ?? ''))
   }, [account])
 
   if (!account) return null
@@ -746,7 +1088,7 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
       title={many ? `${ids.length} accounts` : account.username}
       description={
         many
-          ? 'Group and note apply to all of them. Alias and password stay per account.'
+          ? 'Group, note, and password (if you set one) apply to all of them. Alias stays per account.'
           : `User ID ${account.userId} · added ${relative(account.addedAt)}${
               account.region ? ` from ${account.region}` : ''
             }`
@@ -759,7 +1101,11 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
             variant="primary"
             onClick={() =>
               void run('Saving', () =>
-                api.call('account:update', ids, many ? { group, note } : { alias, group, note, password })
+                api.call(
+                  'account:update',
+                  ids,
+                  many ? { group, note, ...(password ? { password } : {}) } : { alias, group, note, password }
+                )
               ).then(onClose)
             }
           >
@@ -775,15 +1121,7 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
             <Input value={alias} onChange={(e) => setAlias(e.target.value)} placeholder={account.username} />
           </div>
         )}
-        <div>
-          <Label hint="Type a new name to create a group">Group</Label>
-          <Input value={group} onChange={(e) => setGroup(e.target.value)} list="group-options" placeholder="Ungrouped" />
-          <datalist id="group-options">
-            {groups.map((g) => (
-              <option key={g.name} value={g.name} />
-            ))}
-          </datalist>
-        </div>
+        <GroupField value={group} onChange={setGroup} hint="Type a new name to create a group" />
         <div>
           <Label>Note</Label>
           <textarea
@@ -793,18 +1131,16 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
             placeholder="Anything you want to remember about this account"
           />
         </div>
-        {!many && (
-          <div>
-            <Label hint="Kept in the encrypted vault — TrapRAM never signs in with it">Password</Label>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Only if you want it here"
-              spellCheck={false}
-            />
-          </div>
-        )}
+        <div>
+          <Label hint="Kept in the encrypted vault — TrapRAM never signs in with it">Password</Label>
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={many ? 'Leave blank to keep each account’s own password' : 'Only if you want it here'}
+            spellCheck={false}
+          />
+        </div>
         {account.moderation && (
           <div
             className="rounded-[8px] p-2.5 text-[11.5px] leading-snug"

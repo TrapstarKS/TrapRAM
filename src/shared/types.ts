@@ -150,3 +150,19 @@ export interface Toast {
   kind: 'ok' | 'err' | 'info'
   text: string
 }
+
+export interface BulkImportResult {
+  ok: boolean
+  username?: string
+  account?: Account
+  error?: string
+}
+
+export interface BulkLoginResult {
+  index: number
+  username?: string
+  ok: boolean
+  account?: Account
+  skipped?: boolean
+  error?: string
+}
