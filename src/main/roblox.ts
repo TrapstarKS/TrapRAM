@@ -110,6 +110,61 @@ export async function refreshCookie(cookie: string): Promise<string | null> {
   return null
 }
 
+export interface QuickLogin {
+  deviceInfo?: string
+  location?: string
+}
+
+const AUTH_TOKEN = 'https://apis.roblox.com/auth-token-service/v1/login'
+
+export async function quickLoginCode(cookie: string, code: string): Promise<QuickLogin> {
+  return json<QuickLogin>(`${AUTH_TOKEN}/enterCode`, { method: 'POST', cookie, body: { code } })
+}
+
+export async function quickLoginConfirm(cookie: string, code: string): Promise<void> {
+  await json(`${AUTH_TOKEN}/validateCode`, { method: 'POST', cookie, body: { code } })
+}
+
+export interface LoginCode {
+  code: string
+  privateKey: string
+  expirationTime: string
+}
+
+export async function createLoginCode(): Promise<LoginCode> {
+  return json<LoginCode>(`${AUTH_TOKEN}/create`, { method: 'POST', body: {} })
+}
+
+export async function loginQr(code: string, privateKey: string): Promise<string> {
+  const res = await call(
+    `${AUTH_TOKEN}/qr-code-image?key=${encodeURIComponent(privateKey)}&code=${encodeURIComponent(code)}`
+  )
+  if (!res.ok) return ''
+  return `data:image/png;base64,${Buffer.from(await res.arrayBuffer()).toString('base64')}`
+}
+
+export interface LoginStatus {
+  status: 'Created' | 'UserLinked' | 'Validated' | 'Cancelled' | string
+  accountName?: string | null
+}
+
+export async function loginStatus(code: string, privateKey: string): Promise<LoginStatus> {
+  return json<LoginStatus>(`${AUTH_TOKEN}/status`, { method: 'POST', body: { code, privateKey } })
+}
+
+export async function redeemLoginCode(code: string, privateKey: string): Promise<string> {
+  const res = await call('https://auth.roblox.com/v2/login', {
+    method: 'POST',
+    body: { ctype: 'AuthToken', cvalue: code, password: privateKey }
+  })
+  if (!res.ok) throw new RobloxError(res.status, (await res.text()).slice(0, 300) || res.statusText)
+  for (const line of res.headers.getSetCookie()) {
+    const m = line.match(/\.ROBLOSECURITY=([^;]+)/)
+    if (m && m[1].length > 200) return m[1]
+  }
+  throw new RobloxError(res.status, 'Roblox accepted the approval but did not hand back a session')
+}
+
 export async function avatars(userIds: number[]): Promise<Record<number, string>> {
   if (!userIds.length) return {}
   const out: Record<number, string> = {}

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { randomBytes } from 'node:crypto'
-import { seal, open, buildUri, grid, sanitizeAppStorage, parseEtime, mergeVault, fingerprint, shareable, newSyncKey, normalizeSyncKey, formatSyncKey, deriveSync, claimOwners, gate, realPids } from '../src/shared/pure.ts'
-import { reorderIds } from '../src/shared/order.ts'
+import { seal, open, buildUri, grid, sanitizeAppStorage, parseEtime, mergeVault, fingerprint, shareable, newSyncKey, normalizeSyncKey, formatSyncKey, deriveSync, claimOwners, gate, realPids, groupsOf, groupColor, regionMismatch } from '../src/shared/pure.ts'
+import { reorderIds, editTargets, quickCode, utcMillis } from '../src/shared/plain.ts'
 import type { Account, SyncPayload } from '../src/shared/types.ts'
 
 const NOW = Date.parse('2026-07-30T12:00:00Z')
@@ -27,7 +27,7 @@ function account(userId: number, over: Partial<Account> = {}): Account {
 }
 
 function payload(over: Partial<SyncPayload> = {}): SyncPayload {
-  return { accounts: [], cookies: {}, groups: [], presets: [], servers: [], tombstones: {}, ...over }
+  return { accounts: [], cookies: {}, presets: [], servers: [], tombstones: {}, ...over }
 }
 
 test('a working session beats a dead one no matter which side edited last', () => {
@@ -193,20 +193,64 @@ test('a blob sealed on one device opens on the other and nowhere else', () => {
   assert.throws(() => open(deriveSync(newSyncKey()).enc, Buffer.from(wire, 'base64')))
 })
 
-test('groups, presets and servers union instead of overwriting', () => {
-  const local = payload({
-    groups: [{ name: 'main', color: '#f00', order: 0 }],
-    servers: [{ id: 's1', name: 'mine', placeId: 1, linkCode: 'l', accessCode: 'a' }]
-  })
-  const remote = payload({
-    groups: [{ name: 'alts', color: '#0f0', order: 1 }],
-    presets: [{ id: 'p9', name: 'Jailbreak', placeId: 606849621 }]
-  })
+test('presets and servers union instead of overwriting', () => {
+  const local = payload({ servers: [{ id: 's1', name: 'mine', placeId: 1, linkCode: 'l', accessCode: 'a' }] })
+  const remote = payload({ presets: [{ id: 'p9', name: 'Jailbreak', placeId: 606849621 }] })
 
   const { merged } = mergeVault(local, remote, NOW)
-  assert.deepEqual(merged.groups.map((g) => g.name).sort(), ['alts', 'main'])
   assert.equal(merged.presets.length, 1)
   assert.equal(merged.servers.length, 1)
+})
+
+test('a group exists the moment an account claims it', () => {
+  const groups = groupsOf([account(1, { group: 'alts' }), account(2, { group: 'alts' }), account(3)])
+  assert.deepEqual(
+    groups.map((g) => g.name),
+    ['alts']
+  )
+  assert.deepEqual(
+    groups.map((g) => g.order),
+    [0]
+  )
+})
+
+test('a group disappears when its last account leaves', () => {
+  assert.deepEqual(groupsOf([account(1, { group: '' })]), [])
+})
+
+test('the same group name always gets the same colour, on every device', () => {
+  assert.equal(groupColor('alts'), groupColor('alts'))
+  assert.notEqual(groupColor('alts'), groupColor('main'))
+  assert.match(groupColor('alts'), /^oklch\(/)
+})
+
+test('a quick login code survives being typed loosely, and nothing else gets through', () => {
+  assert.equal(quickCode('abc123'), 'ABC123')
+  assert.equal(quickCode(' AB C-123 '), 'ABC123')
+  assert.equal(quickCode('ABC12'), null)
+  assert.equal(quickCode('ABC1234'), null)
+  assert.equal(quickCode(''), null)
+})
+
+test('a Roblox timestamp with no zone is read as UTC, not as local time', () => {
+  assert.equal(utcMillis('2026-07-31T03:21:27.2795244'), Date.parse('2026-07-31T03:21:27.279Z'))
+  assert.equal(utcMillis('2026-07-31T03:21:27Z'), Date.parse('2026-07-31T03:21:27Z'))
+  assert.equal(utcMillis('2026-07-31T03:21:27+00:00'), Date.parse('2026-07-31T03:21:27Z'))
+  assert.equal(utcMillis('2026-07-31T00:21:27-03:00'), Date.parse('2026-07-31T03:21:27Z'))
+})
+
+test('an edit reaches every selected account, not just the row it opened from', () => {
+  assert.deepEqual(editTargets(2, [1, 2, 3]), [1, 2, 3])
+  assert.deepEqual(editTargets(9, [1, 2, 3]), [9])
+  assert.deepEqual(editTargets(2, [2]), [2])
+  assert.deepEqual(editTargets(2, []), [2])
+})
+
+test('a session is only held back when both regions are known and differ', () => {
+  assert.equal(regionMismatch('BR', 'US'), true)
+  assert.equal(regionMismatch('BR', 'BR'), false)
+  assert.equal(regionMismatch(undefined, 'US'), false)
+  assert.equal(regionMismatch('BR', ''), false)
 })
 
 test('ps elapsed time parses in all three BSD shapes', () => {

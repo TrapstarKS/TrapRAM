@@ -4,6 +4,7 @@ import {
   Plus,
   Globe,
   ClipboardPaste,
+  QrCode,
   MoreHorizontal,
   RefreshCw,
   Pin,
@@ -15,10 +16,13 @@ import {
   UserPlus,
   ShieldAlert,
   KeyRound,
-  TimerReset
+  TimerReset,
+  AtSign,
+  Lock,
+  LogIn
 } from 'lucide-react'
 import type { Account } from '@shared/types'
-import { reorderIds } from '@shared/order'
+import { reorderIds, editTargets, quickCode, utcMillis } from '@shared/plain'
 import { useStore, visibleAccounts } from '../store'
 import { api, presenceColor, presenceLabel, relative } from '../lib/api'
 import { Button, IconButton, Input, Label, Modal, Empty } from './ui'
@@ -29,7 +33,9 @@ export default function Sidebar() {
   const list = visibleAccounts(store)
   const [addOpen, setAddOpen] = useState(false)
   const [cookieOpen, setCookieOpen] = useState(false)
+  const [deviceOpen, setDeviceOpen] = useState(false)
   const [editing, setEditing] = useState<Account | null>(null)
+  const [quickFor, setQuickFor] = useState<Account | null>(null)
   const [menuFor, setMenuFor] = useState<number | null>(null)
   const dragId = useRef<number | null>(null)
 
@@ -187,6 +193,7 @@ export default function Sidebar() {
                 <button
                   aria-label={`Actions for ${a.alias || a.username}`}
                   className="shrink-0 rounded p-1 text-[var(--color-faint)] opacity-0 transition-opacity duration-150 ease-[var(--ease-out)] group-hover:opacity-100 hover:text-[var(--color-text)] focus-visible:opacity-100 [.row:hover_&]:opacity-100"
+                  style={menuFor === a.userId ? ({ anchorName: '--row-menu' } as React.CSSProperties) : undefined}
                   onClick={(e) => {
                     e.stopPropagation()
                     setMenuFor(menuFor === a.userId ? null : a.userId)
@@ -203,6 +210,10 @@ export default function Sidebar() {
                   onEdit={() => {
                     setMenuFor(null)
                     setEditing(a)
+                  }}
+                  onQuickLogin={() => {
+                    setMenuFor(null)
+                    setQuickFor(a)
                   }}
                 />
               )}
@@ -221,8 +232,17 @@ export default function Sidebar() {
           <BigChoice
             icon={<Globe size={17} strokeWidth={1.75} />}
             title="Sign in with the built-in browser"
-            hint="Opens an isolated, throwaway Chromium session. TrapRAM reads the session cookie and wipes the window."
+            hint="Opens an isolated, throwaway Chromium session. TrapRAM reads the session cookie and the password you type, keeps both in the encrypted vault, and wipes the window."
             onClick={() => void addByLogin()}
+          />
+          <BigChoice
+            icon={<QrCode size={17} strokeWidth={1.75} />}
+            title="Approve on your phone"
+            hint="Scan a QR code with the Roblox app and approve. No password, no cookie to paste."
+            onClick={() => {
+              setAddOpen(false)
+              setDeviceOpen(true)
+            }}
           />
           <BigChoice
             icon={<ClipboardPaste size={17} strokeWidth={1.75} />}
@@ -237,7 +257,9 @@ export default function Sidebar() {
       </Modal>
 
       <CookieModal open={cookieOpen} onClose={() => setCookieOpen(false)} />
+      <DeviceLoginModal open={deviceOpen} onClose={() => setDeviceOpen(false)} />
       <EditModal account={editing} onClose={() => setEditing(null)} />
+      <QuickLoginModal account={quickFor} onClose={() => setQuickFor(null)} />
     </aside>
   )
 }
@@ -339,9 +361,23 @@ function BigChoice({
   )
 }
 
-function RowMenu({ account, onClose, onEdit }: { account: Account; onClose: () => void; onEdit: () => void }) {
+function RowMenu({
+  account,
+  onClose,
+  onEdit,
+  onQuickLogin
+}: {
+  account: Account
+  onClose: () => void
+  onEdit: () => void
+  onQuickLogin: () => void
+}) {
   const { run, settings, toast } = useStore()
   const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    ref.current?.showPopover()
+  }, [])
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -374,20 +410,42 @@ function RowMenu({ account, onClose, onEdit }: { account: Account; onClose: () =
   return (
     <div
       ref={ref}
-      className="panel rise absolute end-2 top-[38px] z-30 w-[214px] p-1"
-      style={{ animationDuration: '140ms' }}
+      popover="manual"
+      className="panel rise w-[214px] border-0 p-1 text-[var(--color-text)]"
+      style={
+        {
+          animationDuration: '140ms',
+          margin: 0,
+          inset: 'auto',
+          positionAnchor: '--row-menu',
+          positionArea: 'block-end span-inline-start',
+          positionTryFallbacks: 'flip-block'
+        } as React.CSSProperties
+      }
       role="menu"
     >
       {item(<Globe size={13} strokeWidth={1.75} />, 'Open browser as this account', () =>
         run('Opening browser', () => api.call('account:browse', account.userId))
       )}
+      {item(<LogIn size={13} strokeWidth={1.75} />, 'Quick log in with a code', onQuickLogin)}
       {item(<RefreshCw size={13} strokeWidth={1.75} />, 'Revalidate session', () =>
         run('Checking session', () => api.call('account:revalidate', [account.userId]), 'Session checked')
       )}
       {item(<TimerReset size={13} strokeWidth={1.75} />, 'Renew session cookie', () =>
         run('Renewing session', () =>
-          api.call<{ renewed: number }>('account:refreshCookies', [account.userId])
-        ).then((r) => r && toast(r.renewed ? 'ok' : 'info', r.renewed ? 'Session renewed' : 'Roblox kept the current session'))
+          api.call<{ renewed: number; skipped: number }>('account:refreshCookies', [account.userId])
+        ).then(
+          (r) =>
+            r &&
+            toast(
+              r.skipped ? 'err' : r.renewed ? 'ok' : 'info',
+              r.skipped
+                ? 'Left alone — this account was added from another country. Turn the VPN off, or paste its cookie again from here.'
+                : r.renewed
+                  ? 'Session renewed'
+                  : 'Roblox kept the current session'
+            )
+        )
       )}
       {item(<Pencil size={13} strokeWidth={1.75} />, 'Edit alias, group, note', onEdit)}
       {item(
@@ -396,6 +454,18 @@ function RowMenu({ account, onClose, onEdit }: { account: Account; onClose: () =
         () => run('Saving', () => api.call('account:update', account.userId, { pinned: !account.pinned }))
       )}
       <div className="my-1 h-px bg-[var(--color-line)]" />
+      {item(<AtSign size={13} strokeWidth={1.75} />, 'Copy username', () => {
+        void navigator.clipboard.writeText(account.username)
+        toast('ok', 'Username copied')
+      })}
+      {account.password &&
+        item(<Lock size={13} strokeWidth={1.75} />, 'Copy password (clears in 45s)', () =>
+          run(
+            'Copying',
+            () => api.call('account:copyPassword', account.userId),
+            'Password copied — clipboard clears in 45s'
+          )
+        )}
       {!settings?.hideCookieActions &&
         item(<Copy size={13} strokeWidth={1.75} />, 'Copy cookie (clears in 45s)', () =>
           run('Copying', () => api.call('account:copyCookie', account.userId), 'Cookie copied — clipboard clears in 45s')
@@ -449,26 +519,238 @@ function CookieModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   )
 }
 
+interface Ticket {
+  code: string
+  privateKey: string
+  expirationTime: string
+  qr: string
+}
+
+function DeviceLoginModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { toast } = useStore()
+  const [ticket, setTicket] = useState<Ticket | null>(null)
+  const [left, setLeft] = useState(0)
+  const [error, setError] = useState('')
+  const [linked, setLinked] = useState<string | null>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  const issue = () => {
+    setError('')
+    setLinked(null)
+    setTicket(null)
+    void api
+      .call<Ticket>('login:create')
+      .then(setTicket)
+      .catch((e: Error) => setError(e.message))
+  }
+
+  useEffect(() => {
+    if (open) issue()
+    else setTicket(null)
+  }, [open])
+
+  useEffect(() => {
+    if (!ticket) return
+    const deadline = utcMillis(ticket.expirationTime)
+    let alive = true
+
+    const tick = setInterval(() => setLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000))), 500)
+
+    const poll = async () => {
+      let failures = 0
+      while (alive) {
+        await new Promise((r) => setTimeout(r, 2500))
+        if (!alive) return
+        if (Date.now() > deadline) {
+          setError('That code expired before it was approved')
+          return
+        }
+        try {
+          const r = await api.call<{ status: string; accountName: string | null; account: Account | null }>(
+            'login:poll',
+            ticket.code,
+            ticket.privateKey
+          )
+          if (!alive) return
+          failures = 0
+          setLinked(r.accountName)
+          if (r.status === 'Cancelled') {
+            setError('That code was turned down on the phone')
+            return
+          }
+          if (r.account) {
+            toast('ok', `Added ${r.account.username}`)
+            closeRef.current()
+            return
+          }
+        } catch (e) {
+          if (!alive) return
+          if (++failures >= 3) {
+            setError(e instanceof Error ? e.message : String(e))
+            return
+          }
+        }
+      }
+    }
+    void poll()
+
+    return () => {
+      alive = false
+      clearInterval(tick)
+    }
+  }, [ticket, toast])
+
+  return (
+    <Modal
+      open={open}
+      title="Approve on your phone"
+      description="Open Roblox on your phone, go to log in, pick “Another device”, then scan this or type the code."
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={issue} disabled={!!ticket && left > 0}>
+            New code
+          </Button>
+        </>
+      }
+    >
+      {error ? (
+        <div className="rounded-[8px] p-3 text-[12.5px]" style={{ background: 'oklch(0.65 0.208 24 / 0.12)', color: 'var(--color-bad)' }}>
+          {error}
+        </div>
+      ) : !ticket ? (
+        <div className="grid h-[232px] place-items-center text-[12.5px] text-[var(--color-faint)]">
+          Asking Roblox for a code…
+        </div>
+      ) : (
+        <div className="grid justify-items-center gap-2.5">
+          {ticket.qr && <img src={ticket.qr} alt="" width={168} height={168} className="rounded-[8px] bg-white p-2" />}
+          <div className="num text-[24px] font-bold tracking-[0.3em]">{ticket.code}</div>
+          <div className="text-[11.5px] text-[var(--color-faint)]">
+            {left <= 0 ? 'Expired' : linked ? `Waiting for ${linked} to approve · ${left}s` : `Expires in ${left}s`}
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+function QuickLoginModal({ account, onClose }: { account: Account | null; onClose: () => void }) {
+  const { run, toast } = useStore()
+  const [code, setCode] = useState('')
+  const [pending, setPending] = useState<{ code: string; deviceInfo?: string; location?: string } | null>(null)
+
+  useEffect(() => {
+    setCode('')
+    setPending(null)
+  }, [account])
+
+  if (!account) return null
+  const who = account.alias || account.username
+
+  const check = async () => {
+    const clean = quickCode(code)
+    if (!clean) return toast('err', 'A quick login code is 6 characters')
+    const info = await run('Checking the code', () =>
+      api.call<{ deviceInfo?: string; location?: string }>('account:quickLoginCode', account.userId, clean)
+    )
+    if (info) setPending({ code: clean, ...info })
+  }
+
+  const approve = () =>
+    void run('Approving', () => api.call('account:quickLoginConfirm', account.userId, pending!.code)).then((ok) => {
+      if (!ok) return
+      toast('ok', `That device is now signed in as ${who}`)
+      onClose()
+    })
+
+  return (
+    <Modal
+      open
+      title={`Quick log in as ${who}`}
+      description={
+        pending
+          ? 'Approve only if this is the device you are holding.'
+          : 'Type the 6-character code Roblox is showing on the other device. Never enter a code someone sent you — it signs them in as you.'
+      }
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          {pending ? (
+            <Button variant="primary" onClick={approve}>
+              Yes, that is me
+            </Button>
+          ) : (
+            <Button variant="primary" disabled={!quickCode(code)} onClick={() => void check()}>
+              Check code
+            </Button>
+          )}
+        </>
+      }
+    >
+      {pending ? (
+        <div className="grid gap-1.5 rounded-[8px] bg-[var(--color-raised)] p-3 text-[12.5px]">
+          <Row label="Device" value={pending.deviceInfo ?? 'Unknown'} />
+          <Row label="Location" value={pending.location ?? 'Unknown'} />
+          <Row label="Code" value={pending.code} />
+        </div>
+      ) : (
+        <Input
+          className="num !h-[44px] text-center !text-[20px] tracking-[0.4em]"
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 6))}
+          placeholder="ABC123"
+          spellCheck={false}
+          autoFocus
+        />
+      )}
+    </Modal>
+  )
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex gap-3">
+      <span className="w-[64px] shrink-0 text-[var(--color-faint)]">{label}</span>
+      <span className="min-w-0 flex-1 break-words font-semibold">{value}</span>
+    </div>
+  )
+}
+
 function EditModal({ account, onClose }: { account: Account | null; onClose: () => void }) {
-  const { run, groups } = useStore()
+  const { run, groups, selected } = useStore()
   const [alias, setAlias] = useState('')
   const [group, setGroup] = useState('')
   const [note, setNote] = useState('')
+  const [password, setPassword] = useState('')
 
   useEffect(() => {
     if (!account) return
     setAlias(account.alias)
     setGroup(account.group)
     setNote(account.note)
+    setPassword(account.password ?? '')
   }, [account])
 
   if (!account) return null
 
+  const ids = editTargets(account.userId, selected)
+  const many = ids.length > 1
+
   return (
     <Modal
       open
-      title={account.username}
-      description={`User ID ${account.userId} · added ${relative(account.addedAt)}`}
+      title={many ? `${ids.length} accounts` : account.username}
+      description={
+        many
+          ? 'Group and note apply to all of them. Alias and password stay per account.'
+          : `User ID ${account.userId} · added ${relative(account.addedAt)}${
+              account.region ? ` from ${account.region}` : ''
+            }`
+      }
       onClose={onClose}
       footer={
         <>
@@ -476,7 +758,9 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
           <Button
             variant="primary"
             onClick={() =>
-              void run('Saving', () => api.call('account:update', account.userId, { alias, group, note })).then(onClose)
+              void run('Saving', () =>
+                api.call('account:update', ids, many ? { group, note } : { alias, group, note, password })
+              ).then(onClose)
             }
           >
             Save
@@ -485,10 +769,12 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
       }
     >
       <div className="grid gap-3">
-        <div>
-          <Label hint="Shown instead of the username">Alias</Label>
-          <Input value={alias} onChange={(e) => setAlias(e.target.value)} placeholder={account.username} />
-        </div>
+        {!many && (
+          <div>
+            <Label hint="Shown instead of the username">Alias</Label>
+            <Input value={alias} onChange={(e) => setAlias(e.target.value)} placeholder={account.username} />
+          </div>
+        )}
         <div>
           <Label hint="Type a new name to create a group">Group</Label>
           <Input value={group} onChange={(e) => setGroup(e.target.value)} list="group-options" placeholder="Ungrouped" />
@@ -507,6 +793,18 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
             placeholder="Anything you want to remember about this account"
           />
         </div>
+        {!many && (
+          <div>
+            <Label hint="Kept in the encrypted vault — TrapRAM never signs in with it">Password</Label>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Only if you want it here"
+              spellCheck={false}
+            />
+          </div>
+        )}
         {account.moderation && (
           <div
             className="rounded-[8px] p-2.5 text-[11.5px] leading-snug"

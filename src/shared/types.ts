@@ -33,6 +33,9 @@ export interface Account {
   moderation?: Moderation
   order: number
   pinned: boolean
+
+  region?: string
+  password?: string
 }
 
 export interface GroupMeta {
@@ -94,7 +97,6 @@ export interface Settings {
 export interface SyncPayload {
   accounts: Account[]
   cookies: Record<string, string>
-  groups: GroupMeta[]
   presets: Preset[]
   servers: PrivateServer[]
 

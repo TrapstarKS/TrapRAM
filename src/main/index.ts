@@ -3,9 +3,10 @@ import { join } from 'node:path'
 import fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import type { Account, LaunchTarget, Preset, PrivateServer, Settings, SyncState } from '@shared/types'
-import { gate } from '@shared/pure'
+import { gate, groupsOf, regionMismatch } from '@shared/pure'
 import { Vault } from './vault'
 import * as roblox from './roblox'
+import * as region from './region'
 import * as launcher from './launcher'
 import * as system from './system'
 import * as browser from './browser'
@@ -44,7 +45,7 @@ function snapshot() {
   const d = vault.read()
   return {
     accounts: d.accounts,
-    groups: d.groups,
+    groups: groupsOf(d.accounts),
     presets: d.presets,
     servers: d.servers,
     withCookie: Object.keys(d.cookies).map(Number)
@@ -152,18 +153,36 @@ async function revalidate(userId: number): Promise<Account | undefined> {
   } catch {
     acc.cookieExpired = true
   }
+  if (!acc.region && !acc.cookieExpired) acc.region = await region.current()
   acc.moderation = await roblox.moderation(cookie, userId).catch(() => acc.moderation)
   await vault.save()
   return acc
 }
 
-async function refreshSessions(userIds?: number[]): Promise<{ renewed: number; failed: number }> {
+async function stampRegions(): Promise<void> {
+  if (!vault.isUnlocked) return
+  if (!vault.read().accounts.some((a) => !a.region)) return
+  const here = await region.current()
+  if (!here || !vault.isUnlocked) return
+  for (const a of vault.read().accounts) if (!a.region) a.region = here
+  await vault.save()
+}
+
+async function refreshSessions(
+  userIds?: number[]
+): Promise<{ renewed: number; failed: number; skipped: number }> {
   const d = vault.read()
   const targets = d.accounts.filter((a) => (!userIds || userIds.includes(a.userId)) && d.cookies[String(a.userId)])
+  const here = await region.current()
   let renewed = 0
   let failed = 0
+  let skipped = 0
 
   for (const acc of targets) {
+    if (regionMismatch(acc.region, here)) {
+      skipped++
+      continue
+    }
     try {
       const next = await roblox.refreshCookie(d.cookies[String(acc.userId)])
       if (next) {
@@ -172,6 +191,7 @@ async function refreshSessions(userIds?: number[]): Promise<{ renewed: number; f
       }
       acc.cookieExpired = false
       acc.lastValidated = new Date().toISOString()
+      if (!acc.region) acc.region = here
     } catch {
       acc.cookieExpired = true
       failed++
@@ -179,7 +199,7 @@ async function refreshSessions(userIds?: number[]): Promise<{ renewed: number; f
   }
   await vault.save()
   pushData()
-  return { renewed, failed }
+  return { renewed, failed, skipped }
 }
 
 function startRefreshLoop(): void {
@@ -256,8 +276,9 @@ function startPresenceLoop(): void {
   presenceTimer.unref()
 }
 
-async function addFromCookie(cookie: string): Promise<Account> {
+async function addFromCookie(cookie: string, password?: string): Promise<Account> {
   const info = await roblox.validate(cookie)
+  const home = await region.current()
   const d = vault.read()
   const existing = d.accounts.find((a) => a.userId === info.userId)
   d.cookies[String(info.userId)] = cookie
@@ -267,6 +288,8 @@ async function addFromCookie(cookie: string): Promise<Account> {
     existing.displayName = info.displayName
     existing.cookieExpired = false
     existing.lastValidated = new Date().toISOString()
+    existing.region = home
+    if (password) existing.password = password
     await vault.save()
     void refreshAccounts([info.userId]).catch(() => undefined)
     scheduleSync()
@@ -287,7 +310,9 @@ async function addFromCookie(cookie: string): Promise<Account> {
     lastValidated: new Date().toISOString(),
     cookieExpired: false,
     order: d.accounts.length,
-    pinned: false
+    pinned: false,
+    region: home,
+    password
   }
   d.accounts.push(acc)
   delete d.tombstones[String(info.userId)]
@@ -324,6 +349,14 @@ async function enableMultiInstance(): Promise<void> {
 
 async function launchOne(userId: number, target: LaunchTarget): Promise<void> {
   return launches(async () => {
+    const home = vault.read().accounts.find((a) => a.userId === userId)
+    const here = await region.current()
+    if (home && regionMismatch(home.region, here)) {
+      throw new Error(
+        `${home.alias || home.username} was added from ${home.region} and you are in ${here} — launching would sign it in from there. Turn the VPN off, or paste its cookie again from here.`
+      )
+    }
+
     const s = store.get()
     if (s.isolateProfiles) {
       const res = await profiles.activate(userId)
@@ -344,6 +377,16 @@ async function launchOne(userId: number, target: LaunchTarget): Promise<void> {
       await vault.save()
     }
   })
+}
+
+function copyTemporarily(secret: string): boolean {
+  clipboard.writeText(secret)
+  setTimeout(() => {
+    try {
+      if (clipboard.readText() === secret) clipboard.clear()
+    } catch {}
+  }, 45_000).unref()
+  return true
 }
 
 type Handler = (...args: never[]) => unknown
@@ -377,6 +420,7 @@ function registerIpc(): void {
     startRefreshLoop()
     startSyncLoop()
     pollPresence()
+    void stampRegions().catch(() => undefined)
     void backgroundSync()
     return snapshot()
   }, false)
@@ -397,9 +441,9 @@ function registerIpc(): void {
 
   handle('account:addCookie', (cookie: string) => addFromCookie(cookie.trim()))
   handle('account:addLogin', async () => {
-    const cookie = await browser.openLogin(main ?? undefined)
-    if (!cookie) return null
-    return addFromCookie(cookie)
+    const res = await browser.openLogin(main ?? undefined)
+    if (!res) return null
+    return addFromCookie(res.cookie, res.password)
   })
   handle('account:remove', async (userId: number) => {
     await vault.mutate((d) => {
@@ -417,10 +461,16 @@ function registerIpc(): void {
     scheduleSync()
     return res
   })
-  handle('account:update', async (userId: number, patch: Partial<Account>) => {
+  handle('account:update', async (userId: number | number[], patch: Partial<Account>) => {
+    const ids = Array.isArray(userId) ? userId : [userId]
+    const at = new Date().toISOString()
     await vault.mutate((d) => {
-      const a = d.accounts.find((x) => x.userId === userId)
-      if (a) Object.assign(a, patch, { userId: a.userId, updatedAt: new Date().toISOString() })
+      for (const id of ids) {
+        const a = d.accounts.find((x) => x.userId === id)
+        if (!a) continue
+        Object.assign(a, patch, { userId: a.userId, updatedAt: at })
+        a.group = a.group.trim()
+      }
     })
     pushData()
     scheduleSync()
@@ -453,13 +503,29 @@ function registerIpc(): void {
   handle('account:balance', (userId: number) => roblox.balance(vault.cookie(userId), userId))
   handle('account:copyCookie', (userId: number) => {
     if (store.get().hideCookieActions) throw new Error('Cookie actions are disabled in Settings')
-    const cookie = vault.cookie(userId)
-    clipboard.writeText(cookie)
-    setTimeout(() => {
-      try {
-        if (clipboard.readText() === cookie) clipboard.clear()
-      } catch {}
-    }, 45_000).unref()
+    return copyTemporarily(vault.cookie(userId))
+  })
+  handle('account:copyPassword', (userId: number) => {
+    const password = vault.read().accounts.find((a) => a.userId === userId)?.password
+    if (!password) throw new Error('No password saved for this account — add one in Edit')
+    return copyTemporarily(password)
+  })
+  handle('login:create', async () => {
+    const c = await roblox.createLoginCode()
+    return { ...c, qr: await roblox.loginQr(c.code, c.privateKey).catch(() => '') }
+  })
+  handle('login:poll', async (code: string, privateKey: string) => {
+    const s = await roblox.loginStatus(code, privateKey)
+    const seen = { status: s.status, accountName: s.accountName ?? null }
+    if (s.status !== 'Validated') return { ...seen, account: null }
+    const cookie = await roblox.redeemLoginCode(code, privateKey)
+    return { ...seen, account: await addFromCookie(cookie) }
+  })
+  handle('account:quickLoginCode', (userId: number, code: string) =>
+    roblox.quickLoginCode(vault.cookie(userId), code)
+  )
+  handle('account:quickLoginConfirm', async (userId: number, code: string) => {
+    await roblox.quickLoginConfirm(vault.cookie(userId), code)
     return true
   })
   handle('account:browse', async (userId: number, startUrl?: string) => {
@@ -514,12 +580,14 @@ function registerIpc(): void {
       else d.presets.push({ ...preset, id: preset.id || randomUUID() })
     })
     pushData()
+    scheduleSync()
   })
   handle('preset:remove', async (id: string) => {
     await vault.mutate((d) => {
       d.presets = d.presets.filter((p) => p.id !== id)
     })
     pushData()
+    scheduleSync()
   })
   handle('server:save', async (server: PrivateServer) => {
     await vault.mutate((d) => {
@@ -528,27 +596,14 @@ function registerIpc(): void {
       else d.servers.push({ ...server, id: server.id || randomUUID() })
     })
     pushData()
+    scheduleSync()
   })
   handle('server:remove', async (id: string) => {
     await vault.mutate((d) => {
       d.servers = d.servers.filter((s) => s.id !== id)
     })
     pushData()
-  })
-  handle('group:save', async (name: string, color: string) => {
-    await vault.mutate((d) => {
-      const g = d.groups.find((x) => x.name === name)
-      if (g) g.color = color
-      else d.groups.push({ name, color, order: d.groups.length })
-    })
-    pushData()
-  })
-  handle('group:remove', async (name: string) => {
-    await vault.mutate((d) => {
-      d.groups = d.groups.filter((g) => g.name !== name)
-      for (const a of d.accounts) if (a.group === name) a.group = ''
-    })
-    pushData()
+    scheduleSync()
   })
 
   handle('settings:get', () => store.get(), false)
@@ -719,6 +774,7 @@ async function start(): Promise<void> {
     startRefreshLoop()
     startSyncLoop()
     pollPresence()
+    void stampRegions().catch(() => undefined)
     void backgroundSync()
   }
 

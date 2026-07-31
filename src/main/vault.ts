@@ -3,7 +3,7 @@ import { randomBytes, scrypt } from 'node:crypto'
 import { promisify } from 'node:util'
 import { join } from 'node:path'
 import fs from 'node:fs/promises'
-import type { Account, GroupMeta, Preset, PrivateServer, VaultStatus } from '@shared/types'
+import type { Account, Preset, PrivateServer, VaultStatus } from '@shared/types'
 import { seal, open } from '@shared/pure'
 import { writeAtomic } from '@shared/atomic'
 
@@ -19,7 +19,6 @@ const KDF = { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 }
 export interface VaultData {
   accounts: Account[]
   cookies: Record<string, string>
-  groups: GroupMeta[]
   presets: Preset[]
   servers: PrivateServer[]
   tombstones: Record<string, string>
@@ -37,7 +36,6 @@ interface VaultMeta {
 const empty = (): VaultData => ({
   accounts: [],
   cookies: {},
-  groups: [],
   presets: [],
   servers: [],
   tombstones: {}
@@ -239,7 +237,6 @@ export class Vault {
       if (c) d.cookies[String(acc.userId)] = c
       added++
     }
-    for (const g of parsed.groups) if (!d.groups.some((x) => x.name === g.name)) d.groups.push(g)
     for (const p of parsed.presets) if (!d.presets.some((x) => x.id === p.id)) d.presets.push(p)
     for (const s of parsed.servers) if (!d.servers.some((x) => x.id === s.id)) d.servers.push(s)
     await this.save()

@@ -26,7 +26,6 @@ const endpointOf = (url: string, room: string): string => `${url.trim().replace(
 const payloadOf = (d: VaultData): SyncPayload => ({
   accounts: d.accounts.map(shareable),
   cookies: d.cookies,
-  groups: d.groups,
   presets: d.presets,
   servers: d.servers,
   tombstones: d.tombstones ?? {}
@@ -35,7 +34,6 @@ const payloadOf = (d: VaultData): SyncPayload => ({
 const fill = (p: Partial<SyncPayload>): SyncPayload => ({
   accounts: p.accounts ?? [],
   cookies: p.cookies ?? {},
-  groups: p.groups ?? [],
   presets: p.presets ?? [],
   servers: p.servers ?? [],
   tombstones: p.tombstones ?? {}

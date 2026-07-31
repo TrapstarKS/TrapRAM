@@ -172,13 +172,15 @@ export default function SettingsPanel() {
           <Button
             onClick={() =>
               void run('Renewing sessions', () =>
-                api.call<{ renewed: number; failed: number }>('account:refreshCookies')
+                api.call<{ renewed: number; failed: number; skipped: number }>('account:refreshCookies')
               ).then(
                 (r) =>
                   r &&
                   toast(
                     r.failed ? 'err' : 'ok',
-                    `${r.renewed} renewed${r.failed ? `, ${r.failed} failed — those need a fresh sign-in` : ''}`
+                    `${r.renewed} renewed${r.failed ? `, ${r.failed} failed — those need a fresh sign-in` : ''}${
+                      r.skipped ? `, ${r.skipped} left alone — you are connecting from another country` : ''
+                    }`
                   )
               )
             }

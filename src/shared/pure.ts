@@ -1,6 +1,23 @@
 import { randomBytes, createCipheriv, createDecipheriv, hkdfSync } from 'node:crypto'
 import type { Account, GroupMeta, LaunchTarget, Preset, PrivateServer, SyncPayload } from './types'
 
+const GROUP_HUES = [265, 25, 150, 200, 330, 95, 60, 295]
+
+export function groupColor(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return `oklch(0.72 0.15 ${GROUP_HUES[h % GROUP_HUES.length]})`
+}
+
+export function groupsOf(accounts: Account[]): GroupMeta[] {
+  return [...new Set(accounts.map((a) => a.group).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b))
+    .map((name, order) => ({ name, color: groupColor(name), order }))
+}
+
+export const regionMismatch = (home: string | undefined, here: string): boolean =>
+  !!home && !!here && home !== here
+
 export function seal(key: Buffer, plain: Buffer): Buffer {
   const iv = randomBytes(12)
   const c = createCipheriv('aes-256-gcm', key, iv)
@@ -219,7 +236,6 @@ export function mergeVault(
       accounts,
       cookies,
       tombstones,
-      groups: byKey<GroupMeta>(local.groups, remote.groups, (g) => g.name),
       presets: byKey<Preset>(local.presets, remote.presets, (p) => p.id),
       servers: byKey<PrivateServer>(local.servers, remote.servers, (s) => s.id)
     },
@@ -246,7 +262,6 @@ export function fingerprint(p: SyncPayload): string {
       accounts: [...p.accounts].sort((a, b) => a.userId - b.userId),
       cookies: p.cookies,
       tombstones: p.tombstones,
-      groups: [...p.groups].sort((a, b) => a.name.localeCompare(b.name)),
       presets: [...p.presets].sort((a, b) => a.id.localeCompare(b.id)),
       servers: [...p.servers].sort((a, b) => a.id.localeCompare(b.id))
     })

