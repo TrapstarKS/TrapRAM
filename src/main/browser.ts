@@ -119,7 +119,7 @@ export async function openLogin(
   harden(ses)
   await ses.clearStorageData()
 
-  let password = ''
+  let password = prefill?.password ?? ''
   ses.webRequest.onBeforeRequest({ urls: LOGIN_POSTS }, (details, cb) => {
     const raw = details.uploadData?.map((d) => d.bytes?.toString('utf8') ?? '').join('')
     if (raw) {
