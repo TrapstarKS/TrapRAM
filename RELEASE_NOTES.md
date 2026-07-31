@@ -1,27 +1,17 @@
-This one is all repair work. No new features — a review turned up a set of bugs that only show themselves when two things happen at the same time, which is exactly when they are hardest to notice.
+Two new ways to sign in, groups that finally do something, and a guard for anyone who plays behind a VPN.
 
-### Fixed
+### Added
 
-- TrapRAM could close itself while sitting in the background. Two saves landing at the same moment made one of them fail, and nothing was catching that failure.
-- Launching two accounts in quick succession could mix their client profiles together, so one account's client ended up carrying another account's data. Launches now run one at a time.
-- On macOS, two quick launches could claim the same client slot and leave a half-built copy of Roblox behind.
-- A stalled connection left a launch hanging for five minutes with nothing on screen. Requests now give up after 20 seconds and tell you.
-- Copying a cookie and then removing that account, or locking the vault, closed the app 45 seconds later.
-- Syncing could quietly undo an edit made while the sync was still running.
-- Buttons stayed clickable while they were still working, so a double click could unlock, save or add something twice.
-- Dragging an account while a search or group filter was on rewrote the order of the accounts you could not see. Dragging now only applies to manual ordering, and an account lands exactly where you drop it.
-- The dismiss button on a failed update notice did nothing.
-- The address bar in the built-in browser reset itself while you were typing in it.
-- After locking the vault, the unlock screen asked for a password even on keychain vaults.
-- Settings still claimed the vault was protected by the keychain after you switched it to a master password.
-- An interrupted profile swap could leave the wrong account's files saved under another account.
+- Add an account by approving it on your phone. TrapRAM shows a QR code and a six-character code — scan it with the Roblox app, approve, and the account lands here. No password to type, no cookie to paste. Once you scan, the name of the account you picked shows up here while it waits on your confirmation.
+- Quick log in with a code, the other direction: take the code a phone or a console is showing, hand it to an account you already keep here, and that device ends up signed in. TrapRAM shows which device and which location asked before anything is approved. A code that arrives from someone else signs *them* in as you, so this one is never approved blind.
+- Passwords. Signing in through the built-in browser now keeps the password next to the session, and any account can have one typed in by hand. Copy username and copy password live in the account menu, and copying a password clears the clipboard after 45 seconds, the same as copying a cookie already did.
+- Groups work. Typing a group name on an account creates the group, its filter chip appears above the list, and the group disappears on its own when the last account leaves it. Colours come from the name, so two devices agree on them without sending anything extra through the relay.
+- Editing several accounts at once. Select any number of accounts, open the editor on one of them, and the group and note apply to all of them. Aliases and passwords stay per account.
 
 ### Safer
 
-- A page in the built-in browser can no longer hand anything but an http or https link to the operating system. Other protocols are how a web page reaches system tools it has no business touching.
-- Redirects that leave the allowed sites are now stopped the same way a direct click is.
-- The sync relay refuses any write that does not say which version it is replacing.
+- Sessions are now pinned to the country they were added from. Roblox ties a session to where it was created, so renewing a cookie or launching from a VPN in another country can cost you that session — and the automatic renewal sweeps every account at once, unattended, which is the worst possible place for that to happen. TrapRAM records the country when an account is added, then holds back any renewal or launch for accounts that do not match where you are now, naming both countries so you can see what it is refusing and why. Turn the VPN off, or paste that account's cookie again from where you are, to move it to a new home.
 
-### Quieter
+### Fixed
 
-- Avatars are only fetched when they are missing or when you ask for a refresh, and the vault is only rewritten when something actually changed. Both cut most of the background disk and network work.
+- The account menu was trapped inside the scrolling list, so reaching an item on the last few accounts meant scrolling to it first. It now opens above the whole window, and flips upwards when it is near the bottom.
