@@ -588,7 +588,15 @@ function BulkImportModal({ open, onClose }: { open: boolean; onClose: () => void
   const cookieLines = parsed
     .filter((l): l is Extract<BulkLine, { kind: 'cookie' }> => l.kind === 'cookie')
     .slice(0, 50)
-  const credLines = parsed.filter((l): l is Extract<BulkLine, { kind: 'credential' }> => l.kind === 'credential')
+  const seenUsers = new Set<string>()
+  const credLines = parsed
+    .filter((l): l is Extract<BulkLine, { kind: 'credential' }> => l.kind === 'credential')
+    .filter((l) => {
+      const key = l.username.toLowerCase()
+      if (seenUsers.has(key)) return false
+      seenUsers.add(key)
+      return true
+    })
   const skipped = parsed.length - cookieLines.length - credLines.length
 
   async function submit() {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Shield, Plus, Trash2, Play, Pencil } from 'lucide-react'
+import { Shield, Plus, Trash2, Play, Pencil, Copy } from 'lucide-react'
 import type { PrivateServer } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -121,6 +121,17 @@ export default function PrivateServersPanel() {
                 <Button className="!h-[28px] !text-[12px]" onClick={() => void join(s)} disabled={!usable.length}>
                   <Play size={12} strokeWidth={2.25} />
                   Join
+                </Button>
+                <Button
+                  className="!h-[28px] !w-[28px] !px-0"
+                  aria-label={`Copy share link for ${s.name}`}
+                  title="Copy share link"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(`https://www.roblox.com/share?code=${s.linkCode}&type=Server`)
+                    toast('ok', 'Share link copied')
+                  }}
+                >
+                  <Copy size={13} strokeWidth={1.75} />
                 </Button>
                 <Button
                   className="!h-[28px] !w-[28px] !px-0"
