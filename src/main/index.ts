@@ -362,7 +362,7 @@ async function enableMultiInstance(): Promise<void> {
   await launcher.setMultiInstance(true)
 }
 
-async function launchOne(userId: number, target: LaunchTarget): Promise<void> {
+async function runLaunch(userId: number, open: (settings: Settings) => Promise<void>): Promise<void> {
   return launches(async () => {
     const home = vault.read().accounts.find((a) => a.userId === userId)
     const here = await region.current()
@@ -385,13 +385,26 @@ async function launchOne(userId: number, target: LaunchTarget): Promise<void> {
       await enableMultiInstance().catch((e: Error) => send('toast:warn', e.message))
     }
     await throttle()
-    await launcher.launch(vault.cookie(userId), target, s.multiInstance, userId)
+    let launchSettings = s
+    if (launcher.isMac && s.multiInstance) {
+      launchSettings = { ...s, multiInstance: (await system.processes()).length > 0 }
+    }
+    await open(launchSettings)
     const acc = vault.read().accounts.find((a) => a.userId === userId)
     if (acc) {
       acc.lastLaunch = new Date().toISOString()
       await vault.save()
     }
   })
+}
+
+async function launchOne(userId: number, target: LaunchTarget): Promise<void> {
+  return runLaunch(userId, (s) => launcher.launch(vault.cookie(userId), target, s.multiInstance, userId))
+}
+
+async function launchBrowserGame(userId: number, uri: string): Promise<void> {
+  await warnIfSingleInstance(1)
+  return runLaunch(userId, (s) => launcher.launchUri(uri, s.multiInstance, userId))
 }
 
 function copyTemporarily(secret: string): boolean {
@@ -625,7 +638,12 @@ function registerIpc(): void {
       cookie: vault.cookie(userId),
       label: acc ? `${acc.alias || acc.username}` : `Account ${userId}`,
       extensionsDir: await browser.extensionsPath(store.get().extensionsDir),
-      startUrl
+      startUrl,
+      onRobloxLaunch: (uri) => {
+        void launchBrowserGame(userId, uri).catch((e) =>
+          send('toast:warn', e instanceof Error ? e.message : String(e))
+        )
+      }
     })
   })
 

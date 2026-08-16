@@ -1,10 +1,14 @@
-Private servers get a little more control, and bulk import stops double-booking an account you pasted twice.
+Play Roblox straight from the built-in browser, save favourites by Place ID, and only bring in a macOS multi-client when a second client is actually needed.
 
 ### Added
 
-- Private servers can be renamed after they're saved, instead of being stuck with whatever name they had when added.
-- Copy a private server's share link straight from the list — no need to dig it back out to hand it to someone else.
+- The Play button in the built-in Roblox browser now opens the game in Roblox while keeping the account's profile, privacy, region and launch settings in place.
+- Add a favourite by entering its Place ID. TrapRAM resolves the experience name, icon and universe for you.
+
+### Safer
+
+- On macOS, the first client uses the normal Roblox app even when multi-account is enabled. Cloned clients are only used once another Roblox client is already running.
 
 ### Fixed
 
-- Pasting the same username:password twice into bulk import used to open two real sign-in windows for that one account, racing each other. Only the first copy runs now; the rest are skipped like any other already-signed-in account.
+- The built-in browser used to ignore Roblox's `roblox-player:` launch link. It now catches launches from direct navigation, iframes and popups.

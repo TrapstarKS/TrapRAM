@@ -31,8 +31,12 @@ function hostAllowed(url: string): boolean {
   }
 }
 
+function isRobloxLaunch(url: string): boolean {
+  return /^roblox-player:/i.test(url)
+}
+
 export function openExternal(url: string): void {
-  if (!/^https?:\/\//i.test(url)) return
+  if (!/^https?:\/\//i.test(url) && !isRobloxLaunch(url)) return
   void shell.openExternal(url).catch(() => undefined)
 }
 
@@ -48,17 +52,25 @@ function harden(ses: Session): void {
   })
 }
 
-function guardNavigation(view: { webContents: Electron.WebContents }): void {
+function guardNavigation(view: { webContents: Electron.WebContents }, onRobloxLaunch?: (url: string) => void): void {
+  const open = (url: string): void => {
+    if (isRobloxLaunch(url) && onRobloxLaunch) {
+      onRobloxLaunch(url)
+      return
+    }
+    openExternal(url)
+  }
   const block = (e: Electron.Event, url: string): void => {
     if (hostAllowed(url)) return
     e.preventDefault()
-    openExternal(url)
+    open(url)
   }
-  view.webContents.on('will-navigate', block)
+  view.webContents.on('will-frame-navigate', (details) => block(details, details.url))
   view.webContents.on('will-redirect', block)
+  view.webContents.on('did-create-window', (window) => guardNavigation(window, onRobloxLaunch))
   view.webContents.setWindowOpenHandler(({ url }) => {
-    if (hostAllowed(url)) return { action: 'allow' }
-    openExternal(url)
+    if (url === 'about:blank' || hostAllowed(url)) return { action: 'allow' }
+    open(url)
     return { action: 'deny' }
   })
 }
@@ -227,6 +239,7 @@ export async function openBrowseAs(opts: {
   label: string
   extensionsDir: string
   startUrl?: string
+  onRobloxLaunch?: (url: string) => void
 }): Promise<string[]> {
   const existing = browseWindows.get(opts.userId)
   if (existing && !existing.win.isDestroyed()) {
@@ -292,7 +305,7 @@ export async function openBrowseAs(opts: {
     void ses.clearStorageData().catch(() => undefined)
   })
 
-  guardNavigation(content)
+  guardNavigation(content, opts.onRobloxLaunch)
   const update = () => sendState(record)
   content.webContents.on('did-navigate', update)
   content.webContents.on('did-navigate-in-page', update)

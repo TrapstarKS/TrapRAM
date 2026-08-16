@@ -14,6 +14,12 @@ interface GameHit {
   icon?: string
 }
 
+interface GameInfo {
+  name: string
+  universeId: number
+  icon?: string
+}
+
 export default function GamesPanel() {
   const { presets, selected, accounts, run, toast } = useStore()
   const [view, setView] = useState<'search' | 'favorites'>('favorites')
@@ -22,6 +28,8 @@ export default function GamesPanel() {
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [editing, setEditing] = useState<Preset | null>(null)
+  const [placeId, setPlaceId] = useState('')
+  const [adding, setAdding] = useState(false)
 
   const usable = accounts.filter((a) => selected.includes(a.userId) && !a.cookieExpired)
   const favouriteIds = new Set(presets.map((p) => p.placeId))
@@ -55,6 +63,39 @@ export default function GamesPanel() {
       gameName: g.name
     }
     await run('Saving favourite', () => api.call('preset:save', preset), `${g.name} favourited`)
+  }
+
+  async function addByPlaceId() {
+    const raw = placeId.trim()
+    if (!/^\d+$/.test(raw)) return toast('err', 'Enter a valid Place ID')
+    const id = Number(raw)
+    if (!Number.isSafeInteger(id) || id <= 0) return toast('err', 'Enter a valid Place ID')
+    if (presets.some((p) => p.placeId === id)) return toast('info', 'That game is already favourited')
+
+    setAdding(true)
+    const info = await run('Resolving game', () => api.call<GameInfo>('game:ping', id))
+    if (!info) {
+      setAdding(false)
+      return
+    }
+    const preset: Preset = {
+      id: '',
+      name: info.name || `Place ${id}`,
+      placeId: id,
+      universeId: info.universeId,
+      iconUrl: info.icon,
+      gameName: info.name || `Place ${id}`
+    }
+    const saved = await run(
+      'Saving favourite',
+      async () => {
+        await api.call('preset:save', preset)
+        return true
+      },
+      `${preset.name} favourited`
+    )
+    setAdding(false)
+    if (saved) setPlaceId('')
   }
 
   async function launch(placeId: number, name: string, jobId?: string) {
@@ -98,25 +139,41 @@ export default function GamesPanel() {
         }
       >
         {view === 'search' && (
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search
-                size={14}
-                strokeWidth={1.75}
-                className="pointer-events-none absolute inset-y-0 my-auto ms-2.5 text-[var(--color-faint)]"
-              />
-              <Input
-                className="!ps-8"
-                placeholder="Brookhaven, Doors, Blox Fruits…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && void search()}
-                autoFocus
-              />
+          <div className="grid gap-2">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search
+                  size={14}
+                  strokeWidth={1.75}
+                  className="pointer-events-none absolute inset-y-0 my-auto ms-2.5 text-[var(--color-faint)]"
+                />
+                <Input
+                  className="!ps-8"
+                  placeholder="Brookhaven, Doors, Blox Fruits…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && void search()}
+                  autoFocus
+                />
+              </div>
+              <Button variant="primary" loading={loading} onClick={() => void search()} disabled={query.trim().length < 2}>
+                Search
+              </Button>
             </div>
-            <Button variant="primary" loading={loading} onClick={() => void search()} disabled={query.trim().length < 2}>
-              Search
-            </Button>
+            <div className="flex items-center gap-2">
+              <Input
+                className="num flex-1"
+                inputMode="numeric"
+                aria-label="Place ID"
+                placeholder="Or add a favourite by Place ID"
+                value={placeId}
+                onChange={(e) => setPlaceId(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void addByPlaceId()}
+              />
+              <Button loading={adding} onClick={() => void addByPlaceId()} disabled={!placeId.trim()}>
+                Add by ID
+              </Button>
+            </div>
           </div>
         )}
       </Section>

@@ -19,18 +19,10 @@ function remember(userId: number): void {
   while (owners.size > 64) owners.delete(owners.keys().next().value as string)
 }
 
-export async function launch(
-  cookie: string,
-  target: LaunchTarget,
-  multiInstance = false,
-  userId = 0
-): Promise<void> {
-  const ticket = await roblox.authTicket(cookie)
-  const tracker = Math.floor(Math.random() * 1e9)
-  const uri = buildUri(ticket, target, tracker, Date.now())
-
+export async function launchUri(uri: string, multiInstance = false, userId = 0): Promise<void> {
+  const tracker = /(?:browsertrackerid:)(\d+)/i.exec(uri)?.[1]
   if (userId) {
-    owners.set(`b:${tracker}`, userId)
+    if (tracker) owners.set(`b:${tracker}`, userId)
     remember(userId)
   }
 
@@ -42,6 +34,18 @@ export async function launch(
   }
   if (userId && isMac) owners.set('app', userId)
   await shell.openExternal(uri)
+}
+
+export async function launch(
+  cookie: string,
+  target: LaunchTarget,
+  multiInstance = false,
+  userId = 0
+): Promise<void> {
+  const ticket = await roblox.authTicket(cookie)
+  const tracker = Math.floor(Math.random() * 1e9)
+  const uri = buildUri(ticket, target, tracker, Date.now())
+  await launchUri(uri, multiInstance, userId)
 }
 
 const cookieFiles = (): string[] =>
