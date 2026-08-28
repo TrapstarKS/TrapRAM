@@ -54,6 +54,33 @@ export interface Preset {
   gameName?: string
 }
 
+export interface RecentGame {
+  universeId: number
+  placeId: number
+  name: string
+  creator: string
+  playing: number
+  iconUrl?: string
+  lastPlayedAt?: string
+}
+
+export interface PlayerProfile {
+  userId: number
+  username: string
+  displayName: string
+  avatarUrl?: string
+}
+
+export type PlayerFriendStatus = 'friend' | 'pending' | 'incoming' | 'none'
+
+export interface PlayerRelationship {
+  userId: number
+  friendStatus: PlayerFriendStatus
+  isFriend: boolean
+  isFollowing: boolean
+  error?: string
+}
+
 export interface PrivateServer {
   id: string
   name: string

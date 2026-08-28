@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { GameServer, Moderation, Presence } from '@shared/types'
+import type { GameServer, Moderation, PlayerFriendStatus, PlayerProfile, PlayerRelationship, Presence, RecentGame } from '@shared/types'
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
@@ -74,8 +74,24 @@ async function call(url: string, opts: Req = {}, attempt = 0): Promise<Response>
 
 async function json<T>(url: string, opts: Req = {}): Promise<T> {
   const res = await call(url, opts)
-  if (!res.ok) throw new RobloxError(res.status, (await res.text()).slice(0, 300) || res.statusText)
+  if (!res.ok) throw new RobloxError(res.status, await responseMessage(res))
   return (await res.json()) as T
+}
+
+async function responseMessage(res: Response): Promise<string> {
+  const raw = await res.text()
+  try {
+    const body = JSON.parse(raw) as { message?: unknown; errors?: unknown }
+    if (Array.isArray(body.errors)) {
+      const message = body.errors.find(
+        (item): item is { message: string } =>
+          !!item && typeof item === 'object' && 'message' in item && typeof item.message === 'string' && !!item.message.trim()
+      )?.message
+      if (message) return message
+    }
+    if (typeof body.message === 'string' && body.message.trim()) return body.message.trim()
+  } catch {}
+  return raw.slice(0, 300) || res.statusText
 }
 
 export async function validate(cookie: string): Promise<{ userId: number; username: string; displayName: string }> {
@@ -300,6 +316,167 @@ export async function searchGames(query: string): Promise<GameHit[]> {
     .filter((h) => h.placeId > 0)
 }
 
+interface RecentSort {
+  sortDisplayName?: unknown
+  sortId?: unknown
+  contentType?: unknown
+  games?: unknown[]
+  recommendationList?: unknown[]
+}
+
+interface RecentFeed {
+  sorts?: RecentSort[]
+  contentMetadata?: Record<string, Record<string, unknown>>
+}
+
+interface RecentCandidate {
+  universeId: number
+  placeId: number
+  name: string
+  creator: string
+  playing: number
+  iconUrl?: string
+  lastPlayedAt?: string
+}
+
+function asNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+    if (Number.isSafeInteger(n) && n > 0) return n
+  }
+  return undefined
+}
+
+function asCount(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+    if (Number.isSafeInteger(n) && n >= 0) return n
+  }
+  return undefined
+}
+
+function asText(...values: unknown[]): string | undefined {
+  for (const value of values) if (typeof value === 'string' && value.trim()) return value.trim()
+  return undefined
+}
+
+function asIso(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const at = Date.parse(value)
+    return Number.isFinite(at) ? new Date(at).toISOString() : undefined
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const millis = value < 1e12 ? value * 1000 : value
+    const at = new Date(millis).getTime()
+    return Number.isFinite(at) ? new Date(at).toISOString() : undefined
+  }
+  return undefined
+}
+
+function candidateOf(value: unknown): RecentCandidate | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const game = value as Record<string, unknown>
+  const universeId = asNumber(game.universeId, game.UniverseId)
+  const placeId = asNumber(game.placeId, game.rootPlaceId, game.PlaceId, game.RootPlaceId) ?? 0
+  const name = asText(game.name, game.displayName, game.Name, game.DisplayName)
+  if (!universeId || !name) return null
+
+  const creatorValue = game.creator
+  const creatorObject = creatorValue && typeof creatorValue === 'object' ? (creatorValue as Record<string, unknown>) : {}
+  const playingValue = asCount(game.playerCount, game.playing, game.Playing)
+
+  return {
+    universeId,
+    placeId,
+    name,
+    creator: asText(game.creatorName, game.CreatorName, creatorValue, creatorObject.name, creatorObject.displayName) ?? '',
+    playing: playingValue ?? -1,
+    iconUrl: asText(game.iconUrl, game.imageUrl, game.thumbnailUrl),
+    lastPlayedAt: asIso(game.lastPlayedAt ?? game.lastPlayed ?? game.LastPlayedAt ?? game.LastPlayed)
+  }
+}
+
+function recentGamesInFeed(feed: RecentFeed): RecentCandidate[] {
+  const sorts = Array.isArray(feed.sorts) ? feed.sorts : []
+  const sort = sorts.find((item) => {
+    const label = [item.sortDisplayName, item.sortId, item.contentType].filter((v) => typeof v === 'string').join(' ').toLowerCase()
+    const games = Array.isArray(item.games) ? item.games : []
+    const recommendations = Array.isArray(item.recommendationList) ? item.recommendationList : []
+    return (games.length > 0 || recommendations.length > 0) && /recent|visited|continu|played|jog/.test(label)
+  })
+  if (!sort) return []
+
+  const direct = Array.isArray(sort.games) ? sort.games : []
+  const referenced = Array.isArray(sort.recommendationList)
+    ? sort.recommendationList
+        .map((item) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+          const ref = item as Record<string, unknown>
+          if (candidateOf(ref)) return ref
+          const type = asText(ref.contentType)
+          const id = asText(ref.contentId)
+          return type && id ? feed.contentMetadata?.[type]?.[id] : null
+        })
+        .filter((item): item is Record<string, unknown> => !!item)
+    : []
+
+  const seen = new Set<number>()
+  return [...direct, ...referenced]
+    .map(candidateOf)
+    .filter((item): item is RecentCandidate => {
+      if (!item || seen.has(item.universeId)) return false
+      seen.add(item.universeId)
+      return true
+    })
+}
+
+async function enrichRecentGames(candidates: RecentCandidate[]): Promise<RecentGame[]> {
+  if (!candidates.length) return []
+
+  const missing = candidates.filter((game) => !game.placeId).map((game) => game.universeId)
+  const roots: Record<number, number> = {}
+  if (missing.length) {
+    const details = await json<{ data: { id: number; rootPlaceId?: number }[] }>(
+      `https://games.roblox.com/v1/games?universeIds=${missing.slice(0, 50).join(',')}`
+    ).catch(() => ({ data: [] as { id: number; rootPlaceId?: number }[] }))
+    for (const game of details.data) if (game.rootPlaceId) roots[game.id] = game.rootPlaceId
+  }
+
+  const icons = await gameIcons(candidates.map((game) => game.universeId))
+  return candidates
+    .map((game) => ({
+      ...game,
+      placeId: game.placeId || roots[game.universeId] || 0,
+      iconUrl: game.iconUrl || icons[game.universeId]
+    }))
+    .filter((game) => game.placeId > 0)
+    .slice(0, 8)
+}
+
+export async function recentGames(cookie: string): Promise<RecentGame[]> {
+  const sessionId = randomUUID()
+  const search = await json<RecentFeed>(
+    `https://apis.roblox.com/search-landing-page-api/v1?sessionId=${encodeURIComponent(sessionId)}`,
+    { cookie }
+  ).catch(() => null)
+  let candidates = search ? recentGamesInFeed(search) : []
+
+  if (!candidates.length) {
+    const discovery = await json<RecentFeed>('https://apis.roblox.com/discovery-api/omni-recommendation', {
+      method: 'POST',
+      cookie,
+      body: {
+        pageType: 'Home',
+        sessionId,
+        supportedTreatmentTypes: ['SortlessGrid']
+      }
+    })
+    candidates = recentGamesInFeed(discovery)
+  }
+
+  return enrichRecentGames(candidates)
+}
+
 export async function servers(
   cookie: string,
   placeId: number,
@@ -322,6 +499,98 @@ export async function lookupUsername(
   )
   const e = r.data[0]
   return e ? { userId: e.id, username: e.name, displayName: e.displayName } : null
+}
+
+export async function lookupPlayer(query: string): Promise<PlayerProfile | null> {
+  const trimmed = query.trim()
+  if (!trimmed) return null
+
+  let player: Omit<PlayerProfile, 'avatarUrl'> | null
+  if (/^\d+$/.test(trimmed)) {
+    const userId = Number(trimmed)
+    if (!Number.isSafeInteger(userId) || userId <= 0) return null
+    try {
+      const user = await json<{ id: number; name: string; displayName: string }>(
+        `https://users.roblox.com/v1/users/${userId}`
+      )
+      player = { userId: user.id, username: user.name, displayName: user.displayName }
+    } catch (error) {
+      if (error instanceof RobloxError && error.status === 404) return null
+      throw error
+    }
+  } else {
+    player = await lookupUsername(trimmed)
+  }
+
+  if (!player) return null
+  const avatarsByUser = await avatars([player.userId]).catch(() => ({} as Record<number, string>))
+  return { ...player, avatarUrl: avatarsByUser[player.userId] }
+}
+
+async function ensureOk(url: string, opts: Req = {}): Promise<void> {
+  const res = await call(url, opts)
+  if (!res.ok) throw new RobloxError(res.status, await responseMessage(res))
+}
+
+export async function sendFriendRequest(cookie: string, targetUserId: number): Promise<void> {
+  if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0) throw new RobloxError(400, 'That is not a valid User ID')
+  await ensureOk(`https://friends.roblox.com/v1/users/${targetUserId}/request-friendship`, {
+    method: 'POST',
+    cookie,
+    body: {}
+  })
+}
+
+export async function followPlayer(cookie: string, targetUserId: number): Promise<void> {
+  if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0) throw new RobloxError(400, 'That is not a valid User ID')
+  await ensureOk(`https://friends.roblox.com/v1/users/${targetUserId}/follow`, {
+    method: 'POST',
+    cookie,
+    body: {}
+  })
+}
+
+export async function playerRelationship(
+  cookie: string,
+  userId: number,
+  targetUserId: number
+): Promise<Pick<PlayerRelationship, 'friendStatus' | 'isFriend' | 'isFollowing'>> {
+  if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(targetUserId) || targetUserId <= 0) {
+    throw new RobloxError(400, 'That is not a valid User ID')
+  }
+
+  const [friendStatus, following] = await Promise.all([
+    json<{ data?: { id?: number | string; status?: string }[] }>(
+      `https://friends.roblox.com/v1/users/${userId}/friends/statuses?userIds[]=${encodeURIComponent(targetUserId)}`,
+      { cookie }
+    ),
+    json<{ followings?: { userId: number; isFollowing?: boolean }[] }>('https://friends.roblox.com/v1/user/following-exists', {
+      method: 'POST',
+      cookie,
+      body: { targetUserIds: [targetUserId] }
+    })
+  ])
+
+  const rawStatus = friendStatus.data?.find((entry) => Number(entry.id) === targetUserId)?.status
+  const statusKey = rawStatus?.replace(/[\s_-]/g, '').toLowerCase()
+  const normalizedStatus: PlayerFriendStatus =
+    statusKey === 'friends' || statusKey === 'friend'
+      ? 'friend'
+      : statusKey === 'requestsent' || statusKey === 'pending' || statusKey === 'outgoingrequest'
+        ? 'pending'
+        : statusKey === 'requestreceived' || statusKey === 'incomingrequest'
+          ? 'incoming'
+          : statusKey === 'notfriends' || statusKey === 'notfriend' || statusKey === 'none'
+            ? 'none'
+            : (() => {
+                throw new RobloxError(502, 'Roblox returned an unknown friend status')
+              })()
+
+  return {
+    friendStatus: normalizedStatus,
+    isFriend: normalizedStatus === 'friend',
+    isFollowing: !!following.followings?.find((entry) => Number(entry.userId) === targetUserId)?.isFollowing
+  }
 }
 
 export async function resolveShareLink(

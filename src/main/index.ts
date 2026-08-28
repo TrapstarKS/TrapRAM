@@ -7,6 +7,7 @@ import type {
   BulkImportResult,
   BulkLoginResult,
   LaunchTarget,
+  PlayerRelationship,
   Preset,
   PrivateServer,
   Settings,
@@ -402,8 +403,91 @@ async function launchOne(userId: number, target: LaunchTarget): Promise<void> {
   return runLaunch(userId, (s) => launcher.launch(vault.cookie(userId), target, s.multiInstance, userId))
 }
 
+type PlayerAction = 'friend' | 'follow'
+
+async function actOnPlayer(
+  userIds: number[],
+  targetUserId: number,
+  action: PlayerAction
+): Promise<{ userId: number; error: string }[]> {
+  const failed: { userId: number; error: string }[] = []
+  for (const userId of userIds) {
+    try {
+      const cookie = vault.cookie(userId)
+      if (action === 'friend') await roblox.sendFriendRequest(cookie, targetUserId)
+      else await roblox.followPlayer(cookie, targetUserId)
+    } catch (e) {
+      failed.push({ userId, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return failed
+}
+
+async function playerRelationships(userIds: number[], targetUserId: number): Promise<PlayerRelationship[]> {
+  return Promise.all(
+    userIds.map(async (userId) => {
+      try {
+        return { userId, ...(await roblox.playerRelationship(vault.cookie(userId), userId, targetUserId)) }
+      } catch (e) {
+        return {
+          userId,
+          friendStatus: 'none',
+          isFriend: false,
+          isFollowing: false,
+          error: e instanceof Error ? e.message : String(e)
+        }
+      }
+    })
+  )
+}
+
+async function launchIntoPlayer(
+  userIds: number[],
+  targetUserId: number
+): Promise<{ userId: number; error: string }[]> {
+  await warnIfSingleInstance(userIds.length)
+  const failed: { userId: number; error: string }[] = []
+  for (const userId of userIds) {
+    try {
+      const where = await roblox.friendServer(vault.cookie(userId), targetUserId)
+      if (!where) throw new Error('That player is not in a joinable game right now')
+      await launchOne(userId, { placeId: where.placeId, jobId: where.gameId })
+    } catch (e) {
+      failed.push({ userId, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  if (store.get().autoTile) {
+    setTimeout(() => void system.tileWindows().catch(() => undefined), 12_000).unref()
+  }
+  return failed
+}
+
 async function launchBrowserGame(userId: number, uri: string): Promise<void> {
   await warnIfSingleInstance(1)
+
+  if (/^roblox:\/\/navigation\/share_links(?:[/?]|$)/i.test(uri)) {
+    const link = new URL(uri)
+    const type = link.searchParams.get('type')
+    const code = link.searchParams.get('code')?.trim()
+    if (type && type.toLowerCase() !== 'server') throw new Error('TrapRAM can only join Server share links')
+    if (!code) throw new Error('Roblox share link did not contain an invite code')
+
+    const resolved = await roblox.resolveShareLink(vault.cookie(userId), code)
+    return launchOne(userId, {
+      placeId: resolved.placeId,
+      linkCode: resolved.linkCode,
+      accessCode: resolved.accessCode
+    })
+  }
+
+  if (/^roblox:\/\/experiences\/start(?:[/?]|$)/i.test(uri)) {
+    const link = new URL(uri)
+    const placeId = Number(link.searchParams.get('placeId'))
+    const jobId = link.searchParams.get('gameInstanceId') || link.searchParams.get('gameId') || undefined
+    if (!Number.isSafeInteger(placeId) || placeId <= 0) throw new Error('Roblox deep link did not contain a valid Place ID')
+    return launchOne(userId, { placeId, jobId })
+  }
+
   return runLaunch(userId, (s) => launcher.launchUri(uri, s.multiInstance, userId))
 }
 
@@ -673,7 +757,13 @@ function registerIpc(): void {
     return where
   })
 
+  handle('player:lookup', (query: string) => roblox.lookupPlayer(query), false)
+  handle('player:status', (userIds: number[], targetUserId: number) => playerRelationships(userIds, targetUserId))
+  handle('player:friend', (userIds: number[], targetUserId: number) => actOnPlayer(userIds, targetUserId, 'friend'))
+  handle('player:follow', (userIds: number[], targetUserId: number) => actOnPlayer(userIds, targetUserId, 'follow'))
+  handle('launch:player', (userIds: number[], targetUserId: number) => launchIntoPlayer(userIds, targetUserId))
   handle('game:ping', (placeId: number) => launcher.ping(placeId))
+  handle('game:recent', (userId: number) => roblox.recentGames(vault.cookie(userId)))
   handle('game:search', (query: string) => roblox.searchGames(query), false)
   handle('game:servers', (userId: number, placeId: number, cursor?: string) =>
     roblox.servers(vault.cookie(userId), placeId, cursor)

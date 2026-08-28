@@ -11,6 +11,7 @@ const TOOLBAR_H = 46
 
 const ALLOWED = [
   'roblox.com',
+  'ro.blox.com',
   'rbxcdn.com',
   'roblox.qq.com',
   'arkoselabs.com',
@@ -35,8 +36,12 @@ function isRobloxLaunch(url: string): boolean {
   return /^roblox-player:/i.test(url)
 }
 
+function isRobloxDeepLink(url: string): boolean {
+  return /^roblox:\/\/(?:navigation\/share_links|experiences\/start)(?:[/?]|$)/i.test(url)
+}
+
 export function openExternal(url: string): void {
-  if (!/^https?:\/\//i.test(url) && !isRobloxLaunch(url)) return
+  if (!/^https?:\/\//i.test(url) && !isRobloxLaunch(url) && !isRobloxDeepLink(url)) return
   void shell.openExternal(url).catch(() => undefined)
 }
 
@@ -54,19 +59,20 @@ function harden(ses: Session): void {
 
 function guardNavigation(view: { webContents: Electron.WebContents }, onRobloxLaunch?: (url: string) => void): void {
   const open = (url: string): void => {
-    if (isRobloxLaunch(url) && onRobloxLaunch) {
+    if ((isRobloxLaunch(url) || isRobloxDeepLink(url)) && onRobloxLaunch) {
       onRobloxLaunch(url)
       return
     }
     openExternal(url)
   }
-  const block = (e: Electron.Event, url: string): void => {
+  const block = (e: Electron.Event, url: string, isMainFrame = true): void => {
+    if (!isMainFrame) return
     if (hostAllowed(url)) return
     e.preventDefault()
     open(url)
   }
-  view.webContents.on('will-frame-navigate', (details) => block(details, details.url))
-  view.webContents.on('will-redirect', block)
+  view.webContents.on('will-frame-navigate', (details) => block(details, details.url, details.isMainFrame))
+  view.webContents.on('will-redirect', (details) => block(details, details.url, details.isMainFrame))
   view.webContents.on('did-create-window', (window) => guardNavigation(window, onRobloxLaunch))
   view.webContents.setWindowOpenHandler(({ url }) => {
     if (url === 'about:blank' || hostAllowed(url)) return { action: 'allow' }

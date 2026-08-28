@@ -17,6 +17,8 @@ A Roblox account manager for macOS and Windows. Sign in through a built-in brows
 - Server browser: list every public server for a place and send the selection into one exact server
 - "Join an account": pile every selected account into the server one of your accounts is already in
 - Launch presets and saved private servers (share links resolved once, access code stored)
+- Recently played: the eight latest experiences for an account, with quick launch and favourite actions
+- Player actions: find users by username or User ID, send friend requests, follow them and join their current server
 - Multi-client on both platforms, window tiling on both platforms
 
   Windows holds the `ROBLOX_singletonMutex` for as long as TrapRAM is open. That lock can only be taken while no client owns it, so turn the setting on with every Roblox window closed — TrapRAM says so instead of failing quietly if a client got there first. macOS needs three locks undone: `LSMultipleInstancesProhibited` in `Info.plist`, the `/RobloxPlayerUniq` POSIX semaphore, and the code signature — patching the plist breaks the seal the main executable carries over it, so the kernel refuses the binary with `EBADEXEC` until the clone is re-signed ad-hoc with Roblox's own entitlements plus `disable-library-validation`. Clones are APFS copy-on-write (about 2.5 MB of real disk each) and live in numbered slots rather than being rebuilt per launch, so macOS asks for microphone and camera access once per slot instead of on every launch.
@@ -24,6 +26,7 @@ A Roblox account manager for macOS and Windows. Sign in through a built-in brows
 **Per-account browser**
 - Every account opens in a throwaway in-memory Chromium session with a proper toolbar; the cookie is injected on open and the whole session is wiped when the window closes, so nothing is written to disk
 - Drop unpacked Chrome extensions into the extensions folder and they load into every account window
+- Roblox share links opened in the built-in browser are resolved and launched through the selected account
 - Navigation is pinned to Roblox and its login providers; anything else opens in your system browser
 
 **Performance**
