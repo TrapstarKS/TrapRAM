@@ -6,10 +6,9 @@ const COLOR = { ok: 'var(--color-ok)', err: 'var(--color-bad)', info: 'var(--col
 
 export default function Toasts() {
   const { toasts, dismiss } = useStore()
-  if (!toasts.length) return null
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[340px] flex-col gap-2" aria-live="polite">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex max-h-[calc(100dvh-80px)] w-[340px] max-w-[calc(100vw-32px)] flex-col gap-2 overflow-y-auto" aria-live="polite">
       {toasts.map((t) => {
         const Icon = ICON[t.kind]
         return (
@@ -23,7 +22,7 @@ export default function Toasts() {
             <button
               onClick={() => dismiss(t.id)}
               aria-label="Dismiss"
-              className="-mr-1 -mt-0.5 rounded p-1 text-[var(--color-faint)] transition-colors hover:text-[var(--color-text)]"
+              className="-mr-1 -mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded text-[var(--color-faint)] transition-colors hover:text-[var(--color-text)]"
             >
               <X size={13} strokeWidth={2} />
             </button>

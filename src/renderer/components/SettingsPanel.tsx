@@ -33,9 +33,9 @@ export default function SettingsPanel() {
   const win = info?.platform === 'win32'
 
   return (
-    <div className="max-w-[620px] p-5">
+    <div className="settings-content max-w-[760px] p-5">
       <Section title="Appearance">
-        <div className="flex items-center justify-between py-1">
+        <div className="settings-row items-center justify-between py-1">
           <span className="text-[13px] font-medium">Theme</span>
           <Segmented
             value={settings.theme}
@@ -47,7 +47,7 @@ export default function SettingsPanel() {
             ]}
           />
         </div>
-        <div className="flex items-center justify-between py-1">
+        <div className="settings-row items-center justify-between py-1">
           <span className="text-[13px] font-medium">Account order</span>
           <Segmented
             value={settings.sortMode}
@@ -75,7 +75,7 @@ export default function SettingsPanel() {
       </Section>
 
       <Section title="Launching">
-        <div className="flex items-center justify-between py-2">
+        <div className="settings-row items-center justify-between py-2">
           <span className="min-w-0">
             <span className="block text-[13px] font-medium">Delay between launches</span>
             <span className="block text-[11.5px] text-[var(--color-faint)]">
@@ -84,6 +84,7 @@ export default function SettingsPanel() {
           </span>
           <div className="flex shrink-0 items-center gap-2">
             <Input
+              aria-label="Delay between launches in seconds"
               className="num !h-[30px] !w-[76px] text-center"
               inputMode="numeric"
               value={String(settings.launchDelayMs / 1000)}
@@ -133,7 +134,7 @@ export default function SettingsPanel() {
       </Section>
 
       <Section title="Security">
-        <div className="mb-2 flex items-center gap-2 rounded-[10px] bg-[var(--color-raised)] px-3 py-2.5">
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-[10px] bg-[var(--color-raised)] px-3 py-2.5">
           <ShieldCheck size={15} strokeWidth={1.75} style={{ color: 'var(--color-ok)' }} />
           <span className="text-[12.5px]">
             Vault key protected by{' '}
@@ -144,13 +145,14 @@ export default function SettingsPanel() {
           </Button>
         </div>
 
-        <div className="flex items-center justify-between py-2">
+        <div className="settings-row items-center justify-between py-2">
           <span className="min-w-0">
             <span className="block text-[13px] font-medium">Auto-lock when idle</span>
             <span className="block text-[11.5px] text-[var(--color-faint)]">0 keeps the vault open until you quit</span>
           </span>
           <div className="flex shrink-0 items-center gap-2">
             <Input
+              aria-label="Auto-lock after minutes"
               className="num !h-[30px] !w-[76px] text-center"
               inputMode="numeric"
               value={String(settings.autoLockMinutes)}
@@ -259,7 +261,7 @@ export default function SettingsPanel() {
       <Section title="About">
         <div className="flex items-start gap-2 rounded-[10px] bg-[var(--color-raised)] px-3 py-2.5 text-[11.5px] leading-relaxed text-[var(--color-dim)]">
           <Info size={14} strokeWidth={1.75} className="mt-0.5 shrink-0 text-[var(--color-faint)]" />
-          <span>
+          <span className="min-w-0 break-words">
             TrapRAM {info?.version} · {info?.platform}
             <br />
             Data lives in <span className="font-mono text-[11px]">{info?.dataDir}</span>
@@ -303,13 +305,13 @@ export default function SettingsPanel() {
         <div className="grid gap-3">
           {vault?.mode === 'password' && (
             <div>
-              <Label>Current password</Label>
-              <Input type="password" value={cur} onChange={(e) => setCur(e.target.value)} />
+              <Label htmlFor="settingspanel-current-password">Current password</Label>
+              <Input id="settingspanel-current-password" type="password" value={cur} onChange={(e) => setCur(e.target.value)} />
             </div>
           )}
           <div>
-            <Label hint="At least 8 characters">New password</Label>
-            <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} />
+            <Label htmlFor="settingspanel-new-password" hint="At least 8 characters">New password</Label>
+            <Input id="settingspanel-new-password" type="password" value={next} onChange={(e) => setNext(e.target.value)} />
           </div>
         </div>
       </Modal>
@@ -349,8 +351,8 @@ export default function SettingsPanel() {
       >
         <div className="grid gap-3">
           <div>
-            <Label hint="At least 8 characters">Backup password</Label>
-            <Input type="password" value={backupPw} onChange={(e) => setBackupPw(e.target.value)} />
+            <Label htmlFor="settingspanel-backup-password" hint="At least 8 characters">Backup password</Label>
+            <Input id="settingspanel-backup-password" type="password" value={backupPw} onChange={(e) => setBackupPw(e.target.value)} />
           </div>
           {backupOpen === 'import' && (
             <Switch

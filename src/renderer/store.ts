@@ -14,6 +14,8 @@ interface State extends Snapshot {
   groupFilter: string
   toasts: Toast[]
   busy: string | null
+  startupError: string | null
+  launching: boolean
 
   setTab: (t: Tab) => void
   setQuery: (q: string) => void
@@ -27,9 +29,12 @@ interface State extends Snapshot {
   hydrate: () => Promise<void>
   patchSettings: (patch: Partial<Settings>) => Promise<void>
   run: <T>(label: string, fn: () => Promise<T>, success?: string) => Promise<T | undefined>
+  launch: <T>(label: string, fn: () => Promise<T>, success?: string) => Promise<T | undefined>
 }
 
 const emptySnapshot: Snapshot = { accounts: [], groups: [], presets: [], servers: [], withCookie: [] }
+const operations = new Map<symbol, string>()
+let hydration = 0
 
 export const useStore = create<State>((set, get) => ({
   ...emptySnapshot,
@@ -42,6 +47,8 @@ export const useStore = create<State>((set, get) => ({
   groupFilter: '',
   toasts: [],
   busy: null,
+  startupError: null,
+  launching: false,
 
   setTab: (tab) => set({ tab }),
   setQuery: (query) => set({ query }),
@@ -66,37 +73,41 @@ export const useStore = create<State>((set, get) => ({
 
   toast: (kind, text) => {
     const id = Math.random().toString(36).slice(2)
-    set({ toasts: [...get().toasts.slice(-3), { id, kind, text }] })
-    setTimeout(() => get().dismiss(id), kind === 'err' ? 7000 : 3600)
+    set({ toasts: [...get().toasts, { id, kind, text }] })
+    if (kind !== 'err') setTimeout(() => get().dismiss(id), 5000)
   },
   dismiss: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
   setBusy: (busy) => set({ busy }),
 
   hydrate: async () => {
-    const [vault, settings] = await Promise.all([api.call<VaultStatus>('vault:status'), getSettings()])
-    set({ vault, settings })
-    document.documentElement.dataset.theme =
-      settings.theme === 'system'
-        ? window.matchMedia('(prefers-color-scheme: light)').matches
-          ? 'light'
-          : 'dark'
-        : settings.theme
-    if (!vault.locked) set(await getData())
+    const version = ++hydration
+    set({ startupError: null })
+    try {
+      const [vault, settings] = await Promise.all([api.call<VaultStatus>('vault:status'), getSettings()])
+      if (version !== hydration) return
+      set({ vault, settings })
+      if (!vault.locked) {
+        const snap = await getData()
+        if (version === hydration) set({ ...snap, selected: get().selected.filter(id => snap.accounts.some(a => a.userId === id)) })
+      }
+    } catch (error) {
+      if (version !== hydration) return
+      set({ vault: null, settings: null, startupError: error instanceof Error ? error.message : 'Please try again.' })
+    }
   },
 
   patchSettings: async (patch) => {
-    const settings = await api.call<Settings>('settings:set', patch)
-    set({ settings })
-    if (patch.theme)
-      document.documentElement.dataset.theme =
-        patch.theme === 'system'
-          ? window.matchMedia('(prefers-color-scheme: light)').matches
-            ? 'light'
-            : 'dark'
-          : patch.theme
+    try {
+      const settings = await api.call<Settings>('settings:set', patch)
+      set({ settings })
+    } catch (error) {
+      get().toast('err', `Could not save settings. ${error instanceof Error ? error.message : 'Try again.'}`)
+    }
   },
 
   run: async (label, fn, success) => {
+    const operation = Symbol(label)
+    operations.set(operation, label)
     set({ busy: label })
     try {
       const value = await fn()
@@ -106,8 +117,15 @@ export const useStore = create<State>((set, get) => ({
       get().toast('err', e instanceof Error ? e.message : String(e))
       return undefined
     } finally {
-      set({ busy: null })
+      operations.delete(operation)
+      set({ busy: [...operations.values()].at(-1) ?? null })
     }
+  },
+  launch: async (label, fn, success) => {
+    if (get().launching) return undefined
+    set({ launching: true })
+    try { return await get().run(label, fn, success) }
+    finally { set({ launching: false }) }
   }
 }))
 
@@ -131,15 +149,25 @@ export function visibleAccounts(s: Pick<State, 'accounts' | 'query' | 'groupFilt
     })
 }
 
-export function bindEvents(): void {
-  api.on('data:changed', (snap: Snapshot) => useStore.setState(snap))
-  api.on('toast', (text: string) => useStore.getState().toast('info', text))
-  api.on('toast:warn', (text: string) => useStore.getState().toast('err', text))
-  api.on('vault:locked', (status: VaultStatus | undefined) =>
+export function readyAccounts(s: Pick<State, 'accounts' | 'selected' | 'withCookie'>): Account[] {
+  return s.accounts.filter(a => s.selected.includes(a.userId) && !a.cookieExpired && s.withCookie.includes(a.userId))
+}
+
+export function bindEvents(): () => void {
+  const off = [api.on('data:changed', (snap: Snapshot) => {
+    if (useStore.getState().vault?.locked) return
+    useStore.setState(s => ({ ...snap, selected: s.selected.filter(id => snap.accounts.some(a => a.userId === id)), groupFilter: snap.groups.some(g => g.name === s.groupFilter) ? s.groupFilter : '' }))
+  }),
+  api.on('toast', (text: string) => useStore.getState().toast('info', text)),
+  api.on('toast:warn', (text: string) => useStore.getState().toast('err', text)),
+  api.on('vault:locked', (status: VaultStatus | undefined) => {
+    hydration++
     useStore.setState({
       vault: status ?? { ...(useStore.getState().vault ?? { initialized: true, mode: 'password' }), locked: true },
+      selected: [], query: '', groupFilter: '', toasts: [], tab: 'launch',
       ...emptySnapshot
     })
-  )
-  api.on('update:state', (u: UpdateState) => useStore.setState({ update: u }))
+  }),
+  api.on('update:state', (u: UpdateState) => useStore.setState({ update: u }))]
+  return () => off.forEach(unsubscribe => unsubscribe())
 }

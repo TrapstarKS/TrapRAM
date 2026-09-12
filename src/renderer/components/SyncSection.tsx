@@ -54,8 +54,8 @@ export default function SyncSection() {
       {!state.configured ? (
         <div className="grid gap-3">
           <div>
-            <Label hint="The worker URL from worker/README.md — https only">Relay URL</Label>
-            <Input
+            <Label htmlFor="syncsection-relay-url" hint="The worker URL from worker/README.md — https only">Relay URL</Label>
+            <Input id="syncsection-relay-url"
               placeholder="https://trapram-relay.you.workers.dev"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -64,8 +64,8 @@ export default function SyncSection() {
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[220px] flex-1">
-              <Label hint="Leave empty on the first device">Existing sync key</Label>
-              <Input
+              <Label htmlFor="syncsection-existing-sync-key" hint="Leave empty on the first device">Existing sync key</Label>
+              <Input id="syncsection-existing-sync-key"
                 className="font-mono !text-[12px] tracking-[0.06em]"
                 placeholder="ABCDE-FGHJK-MNPQR-STVWX-YZ012"
                 value={joinKey}
@@ -150,6 +150,7 @@ export default function SyncSection() {
             </span>
             <div className="flex shrink-0 items-center gap-2">
               <Input
+                aria-label="Sync interval in minutes"
                 className="num !h-[30px] !w-[76px] text-center"
                 inputMode="numeric"
                 disabled={!settings.syncAuto}

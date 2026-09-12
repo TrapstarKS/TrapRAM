@@ -18,7 +18,7 @@ A Roblox account manager for macOS and Windows. Sign in through a built-in brows
 - "Join an account": pile every selected account into the server one of your accounts is already in
 - Launch presets and saved private servers (share links resolved once, access code stored)
 - Recently played: the eight latest experiences for an account, with quick launch and favourite actions
-- Player actions: find users by username or User ID, send friend requests, follow them and join their current server
+- Player actions: find users by username or User ID, see their activity and current experience when shared, send friend requests, follow them and join their current server. Activity refreshes every 15 seconds; joins recheck the displayed destination before launching
 - Multi-client on both platforms, window tiling on both platforms
 
   Windows holds the `ROBLOX_singletonMutex` for as long as TrapRAM is open. That lock can only be taken while no client owns it, so turn the setting on with every Roblox window closed — TrapRAM says so instead of failing quietly if a client got there first. macOS needs three locks undone: `LSMultipleInstancesProhibited` in `Info.plist`, the `/RobloxPlayerUniq` POSIX semaphore, and the code signature — patching the plist breaks the seal the main executable carries over it, so the kernel refuses the binary with `EBADEXEC` until the clone is re-signed ad-hoc with Roblox's own entitlements plus `disable-library-validation`. Clones are APFS copy-on-write (about 2.5 MB of real disk each) and live in numbered slots rather than being rebuilt per launch, so macOS asks for microphone and camera access once per slot instead of on every launch.
@@ -113,6 +113,18 @@ Set `publish.owner` in `electron-builder.yml` to your GitHub account before ship
 npm run typecheck
 npm test
 ```
+
+The interface also has browser tests and a native Electron smoke test:
+
+```bash
+npx playwright install chromium  # once per machine
+npm run test:ui
+npm run test:electron            # builds first; requires a desktop session
+```
+
+Browser tests use fictional accounts and a mocked IPC boundary. They check selection, launch payloads, player activity, failed saves, search races, keyboard access, both themes, reduced motion, and narrow layouts. The Electron test creates and removes its own temporary password vault; it checks the real preload/IPC, setup, navigation, theme persistence, 200% zoom, locking, and player presence/destination checks with intercepted Roblox responses. Neither suite needs Roblox credentials or launches a game. Screenshots and failure traces are saved under `test-results/`.
+
+See [the UX verification notes](docs/ux-review.md) for the changes and coverage limits.
 
 ## Notes
 

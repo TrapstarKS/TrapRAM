@@ -23,7 +23,10 @@ import {
   ListPlus,
   Loader2,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  X,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react'
 import type { Account, BulkImportResult, BulkLoginResult } from '@shared/types'
 import { reorderIds, editTargets, quickCode, utcMillis, parseBulkLines, type BulkLine } from '@shared/plain'
@@ -66,8 +69,12 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="panel flex w-[292px] shrink-0 flex-col overflow-hidden">
+    <aside className="account-sidebar panel flex w-[292px] shrink-0 flex-col overflow-hidden" aria-label="Accounts">
       <div className="flex shrink-0 flex-col gap-2 border-b px-3 py-2.5">
+        <div className="flex items-center justify-between py-1.5">
+          <h2 className="text-[15px] font-semibold">Accounts <span className="num ms-1 text-[12px] font-medium text-[var(--color-faint)]">{accounts.length}</span></h2>
+          <span className="text-[11px] text-[var(--color-faint)]">Select to launch</span>
+        </div>
         <div className="relative">
           <Search
             size={14}
@@ -76,15 +83,17 @@ export default function Sidebar() {
           />
           <Input
             id="account-search"
+            aria-label="Search accounts"
             placeholder="Search accounts"
-            className="!ps-8 !h-[30px] !text-[12.5px]"
+            className="!ps-8 !pe-8 !text-[13px]"
             value={query}
             onChange={(e) => store.setQuery(e.target.value)}
           />
+          {query && <IconButton label="Clear search" className="absolute end-0 top-0" onClick={() => store.setQuery('')}><X size={13} /></IconButton>}
         </div>
 
         <div className="flex items-center gap-1.5">
-          <Button variant="primary" className="!h-[30px] flex-1 !text-[12px]" onClick={() => setAddOpen(true)}>
+          <Button className="flex-1 !text-[12px]" onClick={() => setAddOpen(true)}>
             <Plus size={14} strokeWidth={2.25} />
             Add account
           </Button>
@@ -116,18 +125,17 @@ export default function Sidebar() {
         )}
       </div>
 
-      {selected.length > 1 && (
-        <div className="flex shrink-0 items-center gap-2 border-b bg-[var(--color-accent-soft)] px-3 py-1.5 text-[11.5px]">
-          <Users size={13} strokeWidth={1.75} style={{ color: 'var(--color-accent-text)' }} />
-          <span className="num font-semibold">{selected.length} selected</span>
-          <button
-            className="ms-auto text-[var(--color-dim)] hover:text-[var(--color-text)]"
-            onClick={store.clearSelection}
-          >
-            Clear
-          </button>
-        </div>
-      )}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 text-[12px]">
+        <label className="flex min-h-7 cursor-pointer items-center gap-2">
+          <input type="checkbox" aria-label="Select all visible accounts" checked={list.length > 0 && list.every(a => selected.includes(a.userId))}
+            ref={el => { if (el) el.indeterminate = list.some(a => selected.includes(a.userId)) && !list.every(a => selected.includes(a.userId)) }}
+            disabled={!list.length} onChange={e => store.selectAll(e.target.checked ? [...new Set([...selected, ...list.map(a => a.userId)])] : selected.filter(id => !list.some(a => a.userId === id)))} />
+          <span>{selected.length ? `${selected.length} selected` : 'Select visible'}</span>
+        </label>
+        {selected.length > 0 && <button className="ms-auto min-h-7 text-[var(--color-accent-text)]" onClick={store.clearSelection}>Clear</button>}
+        {selected.some(id => !list.some(a => a.userId === id)) && <span className="w-full text-[var(--color-warn)]">{selected.filter(id => !list.some(a => a.userId === id)).length} selected outside this filter</span>}
+      </div>
+
 
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5" onClick={(e) => e.target === e.currentTarget && setMenuFor(null)}>
         {list.length === 0 ? (
@@ -139,13 +147,12 @@ export default function Sidebar() {
                 ? 'Try a different name, alias, group or user ID.'
                 : 'Sign in through the built-in browser and TrapRAM stores the session for you.'
             }
+            action={accounts.length ? <Button onClick={() => { store.setQuery(''); store.setGroupFilter('') }}>Clear filters</Button> : <Button onClick={() => setAddOpen(true)}>Add your first account</Button>}
           />
         ) : (
           list.map((a, i) => (
             <div key={a.userId} className="relative">
               <div
-                role="button"
-                tabIndex={0}
                 draggable={manual}
                 onDragStart={() => (dragId.current = a.userId)}
                 onDragOver={(e) => manual && e.preventDefault()}
@@ -153,22 +160,18 @@ export default function Sidebar() {
                 className="row"
                 data-selected={selected.includes(a.userId)}
                 onClick={(e) => select(a.userId, e.metaKey || e.ctrlKey ? 'toggle' : e.shiftKey ? 'range' : 'only')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    select(a.userId)
-                  }
-                }}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   setMenuFor(a.userId)
                 }}
               >
+                <input type="checkbox" aria-label={`Select ${anonymize ? `Account ${i + 1}` : a.alias || a.username}`}
+                  checked={selected.includes(a.userId)} onClick={e => e.stopPropagation()} onChange={() => select(a.userId, 'toggle')} />
                 <Avatar account={a} anonymize={anonymize} index={i} hasCookie={withCookie.includes(a.userId)} />
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate text-[12.5px] font-semibold">
+                    <span className="truncate text-[13px] font-semibold" title={anonymize ? `Account ${i + 1}` : a.alias || a.username}>
                       {anonymize ? `Account ${i + 1}` : a.alias || a.username}
                     </span>
                     {a.pinned && <Pin size={10} strokeWidth={2.25} className="shrink-0 text-[var(--color-faint)]" />}
@@ -189,7 +192,7 @@ export default function Sidebar() {
                       style={{ background: presenceColor(a.presence.type) }}
                     />
                     <span className="truncate">
-                      {a.presence.type === 2 && a.presence.lastLocation
+                      {a.cookieExpired ? 'Session expired' : !withCookie.includes(a.userId) ? 'Sign-in needed' : a.presence.type === 2 && a.presence.lastLocation
                         ? a.presence.lastLocation
                         : presenceLabel(a.presence.type)}
                     </span>
@@ -197,8 +200,9 @@ export default function Sidebar() {
                 </div>
 
                 <button
-                  aria-label={`Actions for ${a.alias || a.username}`}
-                  className="shrink-0 rounded p-1 text-[var(--color-faint)] opacity-0 transition-opacity duration-150 ease-[var(--ease-out)] group-hover:opacity-100 hover:text-[var(--color-text)] focus-visible:opacity-100 [.row:hover_&]:opacity-100"
+                  aria-label={`Actions for ${anonymize ? `Account ${i + 1}` : a.alias || a.username}`}
+                  aria-expanded={menuFor === a.userId}
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[var(--color-faint)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)]"
                   style={menuFor === a.userId ? ({ anchorName: '--row-menu' } as React.CSSProperties) : undefined}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -228,6 +232,13 @@ export default function Sidebar() {
         )}
       </div>
 
+      <div className="sidebar-footer flex items-center justify-between gap-2 border-t px-3 py-3 text-[12px]">
+        <label htmlFor="account-order" className="text-[var(--color-dim)]">Sort by</label>
+        <select id="account-order" className="field !w-auto !h-8 !text-[12px]" value={settings?.sortMode ?? 'custom'} onChange={e => void store.patchSettings({ sortMode: e.target.value as 'custom' | 'name' | 'status' | 'recent' })}>
+          <option value="custom">Manual order</option><option value="name">Name</option><option value="status">Status</option><option value="recent">Last launched</option>
+        </select>
+      </div>
+
       <Modal
         open={addOpen}
         title="Add an account"
@@ -238,7 +249,7 @@ export default function Sidebar() {
           <BigChoice
             icon={<Globe size={17} strokeWidth={1.75} />}
             title="Sign in with the built-in browser"
-            hint="Opens an isolated, throwaway Chromium session. TrapRAM reads the session cookie and the password you type, keeps both in the encrypted vault, and wipes the window. Shift+click to open several at once."
+            hint="Sign in to Roblox in a separate window. Your session and password are saved in the encrypted vault."
             onClick={(e) => {
               if (e.shiftKey) {
                 setAddOpen(false)
@@ -248,6 +259,7 @@ export default function Sidebar() {
               }
             }}
           />
+          <BigChoice icon={<Users size={17} />} title="Sign in to several accounts" hint="Open up to 10 sign-in windows together." onClick={() => { setAddOpen(false); setMultiOpen(true) }} />
           <BigChoice
             icon={<QrCode size={17} strokeWidth={1.75} />}
             title="Approve on your phone"
@@ -350,7 +362,7 @@ function GroupChip({
       className="chip transition-[background-color,box-shadow] duration-150 ease-[var(--ease-out)]"
       style={{
         background: active ? `color-mix(in oklch, ${color} 22%, transparent)` : 'var(--color-raised)',
-        color: active ? color : 'var(--color-dim)',
+        color: 'var(--color-text)',
         boxShadow: active ? `inset 0 0 0 1px color-mix(in oklch, ${color} 45%, transparent)` : 'none'
       }}
       aria-pressed={active}
@@ -400,7 +412,10 @@ function RowMenu({
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
     ref.current?.showPopover()
+    ref.current?.querySelector('button')?.focus()
+    return () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }) }
   }, [])
 
   useEffect(() => {
@@ -419,6 +434,7 @@ function RowMenu({
 
   const item = (icon: React.ReactNode, label: string, fn: () => void, danger?: boolean) => (
     <button
+      key={label}
       className="flex w-full items-center gap-2.5 rounded-[6px] px-2 py-1.5 text-start text-[12px] transition-colors duration-100 hover:bg-[var(--color-hover)]"
       style={danger ? { color: 'var(--color-bad)' } : undefined}
       onClick={() => {
@@ -446,7 +462,8 @@ function RowMenu({
           positionTryFallbacks: 'flip-block'
         } as React.CSSProperties
       }
-      role="menu"
+      role="group"
+      aria-label="Account actions"
     >
       {item(<Globe size={13} strokeWidth={1.75} />, 'Open browser as this account', () =>
         run('Opening browser', () => api.call('account:browse', account.userId))
@@ -477,6 +494,14 @@ function RowMenu({
         account.pinned ? 'Unpin' : 'Pin to top',
         () => run('Saving', () => api.call('account:update', account.userId, { pinned: !account.pinned }))
       )}
+      {settings?.sortMode === 'custom' && (['up', 'down'] as const).map(direction => item(direction === 'up' ? <ArrowUp size={13} /> : <ArrowDown size={13} />, `Move ${direction}`, () => {
+        const ordered = [...useStore.getState().accounts].sort((a, b) => a.order - b.order).map(a => a.userId)
+        const index = ordered.indexOf(account.userId)
+        const target = ordered[index + (direction === 'up' ? -1 : 1)]
+        if (target === undefined) return
+        const next = reorderIds(ordered, account.userId, target)
+        if (next) void run('Reordering', () => api.call('account:reorder', next))
+      }))}
       <div className="my-1 h-px bg-[var(--color-line)]" />
       {item(<AtSign size={13} strokeWidth={1.75} />, 'Copy username', () => {
         void navigator.clipboard.writeText(account.username)
@@ -496,9 +521,7 @@ function RowMenu({
         )}
       {item(<Trash2 size={13} strokeWidth={1.75} />, 'Remove account', () => {
         if (!confirm(`Remove ${account.alias || account.username} from TrapRAM?`)) return
-        void run('Removing', () => api.call('account:remove', account.userId)).then(() =>
-          toast('ok', 'Account removed')
-        )
+        void run('Removing', () => api.call('account:remove', account.userId), 'Account removed')
       }, true)}
     </div>
   )
@@ -533,6 +556,7 @@ function CookieModal({ open, onClose }: { open: boolean; onClose: () => void }) 
       }
     >
       <textarea
+        aria-label="Session cookie"
         className="field h-[110px] resize-none py-2 font-mono text-[11px] leading-relaxed"
         placeholder="_|WARNING:-DO-NOT-SHARE-THIS…"
         value={value}
@@ -697,8 +721,8 @@ function GroupField({ value, onChange, hint }: { value: string; onChange: (v: st
   const { groups } = useStore()
   return (
     <div>
-      <Label hint={hint}>Group</Label>
-      <Input value={value} onChange={(e) => onChange(e.target.value)} list="group-options" placeholder="Ungrouped" />
+      <Label htmlFor="sidebar-group" hint={hint}>Group</Label>
+      <Input id="sidebar-group" value={value} onChange={(e) => onChange(e.target.value)} list="group-options" placeholder="Ungrouped" />
       <datalist id="group-options">
         {groups.map((g) => (
           <option key={g.name} value={g.name} />
@@ -829,8 +853,8 @@ function MultiLoginModal({ open, onClose }: { open: boolean; onClose: () => void
         </>
       }
     >
-      <Label hint="Up to 10 at once.">Browsers to open</Label>
-      <Input
+      <Label htmlFor="sidebar-browsers-to-open" hint="Up to 10 at once.">Browsers to open</Label>
+      <Input id="sidebar-browsers-to-open"
         aria-label="Number of browsers to open"
         type="number"
         min={1}
@@ -1049,6 +1073,7 @@ function QuickLoginModal({ account, onClose }: { account: Account | null; onClos
         </div>
       ) : (
         <Input
+          aria-label="Quick login code"
           className="num !h-[44px] text-center !text-[20px] tracking-[0.4em]"
           value={code}
           onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 6))}
@@ -1076,6 +1101,7 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
   const [group, setGroup] = useState('')
   const [note, setNote] = useState('')
   const [password, setPassword] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!account) return
@@ -1107,15 +1133,20 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            onClick={() =>
-              void run('Saving', () =>
-                api.call(
+            loading={saving}
+            onClick={async () => {
+              setSaving(true)
+              const saved = await run('Saving', async () => {
+                await api.call(
                   'account:update',
                   ids,
                   many ? { group, note, ...(password ? { password } : {}) } : { alias, group, note, password }
                 )
-              ).then(onClose)
-            }
+                return true
+              })
+              setSaving(false)
+              if (saved) onClose()
+            }}
           >
             Save
           </Button>
@@ -1125,14 +1156,14 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
       <div className="grid gap-3">
         {!many && (
           <div>
-            <Label hint="Shown instead of the username">Alias</Label>
-            <Input value={alias} onChange={(e) => setAlias(e.target.value)} placeholder={account.username} />
+            <Label htmlFor="sidebar-alias" hint="Shown instead of the username">Alias</Label>
+            <Input id="sidebar-alias" value={alias} onChange={(e) => setAlias(e.target.value)} placeholder={account.username} />
           </div>
         )}
         <GroupField value={group} onChange={setGroup} hint="Type a new name to create a group" />
         <div>
-          <Label>Note</Label>
-          <textarea
+          <Label htmlFor="sidebar-note">Note</Label>
+          <textarea id="sidebar-note"
             className="field h-[70px] resize-none py-2 text-[12.5px]"
             value={note}
             onChange={(e) => setNote(e.target.value)}
@@ -1140,8 +1171,8 @@ function EditModal({ account, onClose }: { account: Account | null; onClose: () 
           />
         </div>
         <div>
-          <Label hint="Kept in the encrypted vault — TrapRAM never signs in with it">Password</Label>
-          <Input
+          <Label htmlFor="sidebar-password" hint="Kept in the encrypted vault — TrapRAM never signs in with it">Password</Label>
+          <Input id="sidebar-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

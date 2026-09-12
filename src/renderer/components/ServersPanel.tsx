@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Server, Play, RefreshCw, Search } from 'lucide-react'
 import type { GameServer } from '@shared/types'
-import { useStore } from '../store'
+import { useStore, readyAccounts } from '../store'
+import { parsePlaceId } from '@shared/plain'
 import { api } from '../lib/api'
 import { Button, Input, Label, Empty, Section, Segmented } from './ui'
 
 type Filter = 'all' | 'empty' | 'full'
 
 export default function ServersPanel() {
-  const { selected, accounts, settings, run, toast } = useStore()
+  const store = useStore()
+  const { accounts, settings, withCookie, toast, launch: runLaunch, launching } = store
   const [placeId, setPlaceId] = useState(() => {
     const last = useStore.getState().settings?.lastPlaceId
     return last ? String(last) : ''
@@ -17,32 +19,50 @@ export default function ServersPanel() {
   const [cursor, setCursor] = useState<string | undefined>()
   const [filter, setFilter] = useState<Filter>('all')
   const [loading, setLoading] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState('')
+  const request = useRef(0)
 
   useEffect(() => {
     if (settings?.lastPlaceId && !placeId) setPlaceId(String(settings.lastPlaceId))
   }, [settings?.lastPlaceId])
 
-  const usable = accounts.filter((a) => selected.includes(a.userId) && !a.cookieExpired)
-  const numericPlace = Number(placeId.replace(/\D/g, ''))
+  const usable = readyAccounts(store)
+  const numericPlace = parsePlaceId(placeId)
 
-  async function load(next?: boolean) {
-    if (!numericPlace) return toast('err', 'Enter a Place ID first')
-    if (!accounts.length) return toast('err', 'Add an account first — the server list needs a session')
-    const who = usable[0] ?? accounts[0]
-    setLoading(true)
-    const res = await run('Loading servers', () =>
-      api.call<{ list: GameServer[]; cursor?: string }>('game:servers', who.userId, numericPlace, next ? cursor : undefined)
-    )
+  function changePlace(value: string) {
+    request.current++
+    setPlaceId(value)
+    setList([])
+    setCursor(undefined)
+    setLoaded(false)
     setLoading(false)
-    if (!res) return
-    setList(next ? [...list, ...res.list] : res.list)
-    setCursor(res.cursor)
+    setError('')
+  }
+
+  async function load(next = false) {
+    if (!numericPlace) return setError('Enter a valid Place ID or a full Roblox game link.')
+    const who = usable[0] ?? accounts.find(a => !a.cookieExpired && withCookie.includes(a.userId))
+    if (!who) return setError('Add an account with a saved session to load servers.')
+    const current = ++request.current
+    setLoading(true)
+    setError('')
+    if (!next) { setList([]); setCursor(undefined); setLoaded(false) }
+    try {
+      const res = await api.call<{ list: GameServer[]; cursor?: string }>('game:servers', who.userId, numericPlace, next ? cursor : undefined)
+      if (current !== request.current) return
+      setList(previous => next ? [...new Map([...previous, ...res.list].map(s => [s.id, s])).values()] : res.list)
+      setCursor(res.cursor)
+      setLoaded(true)
+    } catch (error) {
+      if (current === request.current) setError(`Could not load servers. ${error instanceof Error ? error.message : 'Check your connection.'} Try again.`)
+    } finally { if (current === request.current) setLoading(false) }
   }
 
   async function join(jobId: string) {
     if (!usable.length) return toast('err', 'Select at least one account')
     const target = { placeId: numericPlace, jobId }
-    const failed = await run(`Joining ${usable.length} account${usable.length === 1 ? '' : 's'}`, () =>
+    const failed = await runLaunch(`Joining ${usable.length} account${usable.length === 1 ? '' : 's'}`, () =>
       api.call<{ error: string }[]>(
         'launch:many',
         usable.map((a) => a.userId),
@@ -61,38 +81,37 @@ export default function ServersPanel() {
       <Section title="Server browser" hint="Pick an exact server and send every selected account into it">
         <div className="flex items-end gap-2">
           <div className="flex-1">
-            <Label>Place ID</Label>
+            <Label htmlFor="serverspanel-place-id">Experience link or Place ID</Label>
             <div className="relative">
               <Search
                 size={14}
                 strokeWidth={1.75}
                 className="pointer-events-none absolute inset-y-0 my-auto ms-2.5 text-[var(--color-faint)]"
               />
-              <Input
+              <Input id="serverspanel-place-id"
                 className="!ps-8 num"
-                inputMode="numeric"
                 placeholder="e.g. 920587237"
                 value={placeId}
-                onChange={(e) => setPlaceId(e.target.value)}
+                onChange={(e) => changePlace(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && void load()}
               />
             </div>
           </div>
           <Button variant="primary" loading={loading} onClick={() => void load()}>
             <RefreshCw size={14} strokeWidth={2} />
-            Load
+            Load servers
           </Button>
         </div>
 
         {list.length > 0 && (
-          <div className="mt-3 flex items-center justify-between">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <Segmented
               value={filter}
               onChange={setFilter}
               options={[
                 { value: 'all', label: 'All' },
-                { value: 'empty', label: 'Emptiest' },
-                { value: 'full', label: 'Fullest' }
+                { value: 'empty', label: 'Most space' },
+                { value: 'full', label: 'Nearly full' }
               ]}
             />
             <span className="num text-[11.5px] text-[var(--color-faint)]">{shown.length} servers</span>
@@ -100,18 +119,21 @@ export default function ServersPanel() {
         )}
       </Section>
 
-      {shown.length === 0 ? (
+      <div className="selection-notice">{usable.length ? `${usable.length} account(s) ready to join` : 'Select accounts to join. Browsing uses an available saved session.'}</div>
+      {error && <div role="alert" className="mb-4 rounded-lg border border-[var(--color-bad)] p-3 text-[13px] text-[var(--color-bad)]">{error} <Button onClick={() => void load()}>Try again</Button></div>}
+      {loading && !list.length ? <div role="status" className="py-12 text-center text-[var(--color-dim)]">Loading servers…</div> : shown.length === 0 ? (
         <Empty
           icon={<Server size={18} strokeWidth={1.75} />}
-          title="No servers loaded"
-          hint="Enter a Place ID and load the list. TrapRAM uses the first selected account's session to read it."
+          title={loaded ? list.length ? 'No servers match this filter' : 'No public servers found' : 'Find a server'}
+          hint={loaded ? 'Try another filter or refresh the server list.' : 'Paste an experience link or Place ID above, then load its public servers.'}
+          action={filter !== 'all' ? <Button onClick={() => setFilter('all')}>Clear filter</Button> : undefined}
         />
       ) : (
         <div className="grid gap-1">
           {shown.map((s) => (
             <div key={s.id} className="flex items-center gap-3 rounded-[10px] bg-[var(--color-raised)] px-3 py-2">
               <div className="min-w-0 flex-1">
-                <div className="num truncate font-mono text-[11px] text-[var(--color-dim)]">{s.id}</div>
+                <div title={s.id} className="num truncate font-mono text-[11px] text-[var(--color-dim)]">{s.id}</div>
                 <div className="mt-1 h-1 w-full max-w-[180px] overflow-hidden rounded-full bg-[var(--color-bg-deep)]">
                   <div
                     className="h-full rounded-full"
@@ -131,19 +153,16 @@ export default function ServersPanel() {
                   {Math.round(s.fps)} fps{s.ping ? ` · ${s.ping} ms` : ''}
                 </div>
               </div>
-              <Button className="!h-[28px] !text-[12px]" onClick={() => void join(s.id)} disabled={!usable.length}>
+              <Button className="!h-[28px] !text-[12px]" onClick={() => void join(s.id)} disabled={!usable.length || launching || s.playing >= s.maxPlayers}>
                 <Play size={12} strokeWidth={2.25} />
-                Join
+                {s.playing >= s.maxPlayers ? 'Full' : 'Join'}
               </Button>
             </div>
           ))}
-          {cursor && (
-            <Button className="mt-2" onClick={() => void load(true)} loading={loading}>
-              Load more
-            </Button>
-          )}
+
         </div>
       )}
+      {cursor && <Button className="mt-3 w-full" onClick={() => void load(true)} loading={loading}>Load more servers</Button>}
     </div>
   )
 }

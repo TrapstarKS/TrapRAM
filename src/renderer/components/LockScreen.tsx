@@ -41,7 +41,7 @@ export default function LockScreen({ status }: { status: VaultStatus }) {
   }
 
   return (
-    <div className="grid h-[calc(100%-2.5rem)] place-items-center px-6">
+    <main className="grid h-[calc(100%-2.5rem)] overflow-y-auto place-items-center px-6 py-6">
       <div className="panel rise w-full max-w-[400px] p-6">
         <div
           className="mb-4 grid h-11 w-11 place-items-center rounded-[13px]"
@@ -83,12 +83,12 @@ export default function LockScreen({ status }: { status: VaultStatus }) {
             {mode === 'password' ? (
               <div className="mt-4 grid gap-3">
                 <div>
-                  <Label hint="At least 8 characters">Master password</Label>
-                  <Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus />
+                  <Label htmlFor="lockscreen-master-password" hint="At least 8 characters">Master password</Label>
+                  <Input id="lockscreen-master-password" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus />
                 </div>
                 <div>
-                  <Label>Confirm</Label>
-                  <Input
+                  <Label htmlFor="lockscreen-confirm">Confirm</Label>
+                  <Input id="lockscreen-confirm"
                     type="password"
                     value={pw2}
                     onChange={(e) => setPw2(e.target.value)}
@@ -112,6 +112,8 @@ export default function LockScreen({ status }: { status: VaultStatus }) {
           <div className="mt-5 grid gap-3">
             {status.mode === 'password' ? (
               <Input
+                aria-label="Master password"
+                autoComplete="current-password"
                 type="password"
                 placeholder="Master password"
                 value={pw}
@@ -126,7 +128,7 @@ export default function LockScreen({ status }: { status: VaultStatus }) {
           </div>
         )}
       </div>
-    </div>
+    </main>
   )
 }
 

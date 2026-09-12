@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { GameServer, Moderation, PlayerFriendStatus, PlayerProfile, PlayerRelationship, Presence, RecentGame } from '@shared/types'
+import type { GameServer, Moderation, PlayerFriendStatus, PlayerProfile, PlayerRelationship, PlayerServer, Presence, RecentGame } from '@shared/types'
+import { playerServer } from '@shared/plain'
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
@@ -194,7 +195,7 @@ export async function avatars(userIds: number[]): Promise<Record<number, string>
   return out
 }
 
-export async function presences(cookie: string, userIds: number[]): Promise<Record<number, Presence>> {
+export async function presences(cookie: string | undefined, userIds: number[]): Promise<Record<number, Presence>> {
   if (!userIds.length) return {}
   const r = await json<{
     userPresences: {
@@ -209,7 +210,7 @@ export async function presences(cookie: string, userIds: number[]): Promise<Reco
   const out: Record<number, Presence> = {}
   for (const p of r.userPresences) {
     out[p.userId] = {
-      type: (p.userPresenceType ?? 0) as Presence['type'],
+      type: p.userPresenceType as Presence['type'],
       placeId: p.placeId,
       gameId: p.gameId,
       universeId: p.universeId,
@@ -650,9 +651,9 @@ export async function moderation(cookie: string, userId: number): Promise<Modera
 
 export async function friendServer(
   cookie: string,
-  userId: number
-): Promise<{ placeId: number; gameId: string } | null> {
+  userId: number,
+  expected?: PlayerServer
+): Promise<PlayerServer | null> {
   const p = await presences(cookie, [userId])
-  const it = p[userId]
-  return it?.placeId && it.gameId ? { placeId: it.placeId, gameId: it.gameId } : null
+  return playerServer(p[userId], expected)
 }

@@ -1,17 +1,24 @@
-Play, discover and manage Roblox accounts without leaving TrapRAM.
+See where a player is before joining, with a clearer interface from account selection to launch.
 
 ### Added
 
-- Recently played experiences now show the eight latest games for the selected account, with context, quick launch and one-click favourite actions.
-- Player actions let the selected accounts find a Roblox user by username or User ID, send friend requests, follow them and join their current server.
-- Friend and follow actions show the result across every selected account instead of stopping at the first failure.
+- Player actions now show whether someone is offline, online, in a game or in Roblox Studio, along with the experience name and Place ID when Roblox shares them.
+- Player activity refreshes automatically every 15 seconds and can be refreshed manually. Hidden activity and connection errors have their own explanations.
+- Join server checks the displayed destination again before launching. If the player changes games or servers, TrapRAM stops the join and asks you to refresh.
+- Account selection now has checkboxes, select-all for visible accounts, a clear selection action and a count of selected accounts outside the current filter.
+
+### Improved
+
+- Refreshed layouts, spacing, typography and contrast across the app, with clearer navigation and better support for narrow windows, light mode and dark mode.
+- Keyboard navigation, visible focus, accessible field labels and dialogs that keep focus inside and return it when closed.
+- Game launch and favourite actions stay visible without hovering. Loading, empty and error states explain what to do next.
+- Player actions account for differences in visibility between selected sessions. Only accounts that can see the displayed server are included in the join request.
 
 ### Fixed
 
-- Roblox share links opened from the built-in browser now resolve inside TrapRAM and launch through the selected account.
-- YouTube and other embedded content stays inside Roblox pages instead of being sent to the system browser.
-- Friend status now distinguishes confirmed friends, pending requests and incoming requests. Pending requests cannot be sent twice, and the status refreshes automatically after acceptance.
-
-### Safer
-
-- External navigation rules continue to protect the built-in browser while allowing legitimate Roblox deep links and embedded frames.
+- Accounts with expired or missing sessions no longer enable launch actions or silently fall back to another account.
+- Repeated clicks cannot queue duplicate launches, and saved favourites keep their exact server destination.
+- Experience fields accept Roblox game links and validate Place IDs. Changing the experience clears old server results.
+- Older player lookups, presence checks and search responses no longer replace newer results.
+- Failed saves keep your inputs open for correction or retry. Removed accounts and locked vaults clear stale selections.
+- Newly added accounts and launch times appear immediately, without waiting for a later refresh.

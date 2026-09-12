@@ -465,6 +465,7 @@ export default function PerformancePanel() {
         }
       >
         <textarea
+          aria-label="Custom flags JSON"
           className="field h-[300px] resize-none py-2 font-mono text-[11.5px] leading-relaxed"
           value={editorText}
           onChange={(e) => setEditorText(e.target.value)}

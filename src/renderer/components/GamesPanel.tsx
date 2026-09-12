@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Search, Star, Play, Gamepad2, Users, Pencil } from 'lucide-react'
 import type { Preset } from '@shared/types'
-import { useStore } from '../store'
+import { useStore, readyAccounts } from '../store'
 import { api } from '../lib/api'
 import { Button, Input, Label, Empty, Section, Segmented, Modal } from './ui'
 
@@ -12,6 +12,7 @@ interface GameHit {
   creator: string
   playing: number
   icon?: string
+  jobId?: string
 }
 
 interface GameInfo {
@@ -21,7 +22,8 @@ interface GameInfo {
 }
 
 export default function GamesPanel() {
-  const { presets, selected, accounts, run, toast } = useStore()
+  const store = useStore()
+  const { presets, run, toast, launch: runLaunch, launching } = store
   const [view, setView] = useState<'search' | 'favorites'>('favorites')
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<GameHit[]>([])
@@ -30,8 +32,11 @@ export default function GamesPanel() {
   const [editing, setEditing] = useState<Preset | null>(null)
   const [placeId, setPlaceId] = useState('')
   const [adding, setAdding] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const request = useRef(0)
+  const [saving, setSaving] = useState(false)
 
-  const usable = accounts.filter((a) => selected.includes(a.userId) && !a.cookieExpired)
+  const usable = readyAccounts(store)
   const favouriteIds = new Set(presets.map((p) => p.placeId))
 
   useEffect(() => {
@@ -41,11 +46,16 @@ export default function GamesPanel() {
   async function search() {
     const q = query.trim()
     if (q.length < 2) return
+    const current = ++request.current
     setLoading(true)
-    const res = await run('Searching Roblox', () => api.call<GameHit[]>('game:search', q))
-    setLoading(false)
-    setSearched(true)
-    if (res) setHits(res)
+    setHits([])
+    setSearchError('')
+    try {
+      const res = await api.call<GameHit[]>('game:search', q)
+      if (current === request.current) { setHits(res); setSearched(true) }
+    } catch {
+      if (current === request.current) setSearchError('Could not search Roblox. Check your connection and try again.')
+    } finally { if (current === request.current) setLoading(false) }
   }
 
   async function favourite(g: GameHit) {
@@ -100,7 +110,7 @@ export default function GamesPanel() {
 
   async function launch(placeId: number, name: string, jobId?: string) {
     if (!usable.length) return toast('err', 'Select at least one account first')
-    const failed = await run(`Launching ${usable.length} account${usable.length === 1 ? '' : 's'}`, () =>
+    const failed = await runLaunch(`Launching ${usable.length} account${usable.length === 1 ? '' : 's'}`, () =>
       api.call<{ error: string }[]>(
         'launch:many',
         usable.map((a) => a.userId),
@@ -118,14 +128,15 @@ export default function GamesPanel() {
           name: p.name,
           creator: '',
           playing: -1,
-          icon: p.iconUrl
+          icon: p.iconUrl,
+          jobId: p.jobId
         }))
       : hits
 
   return (
     <div className="p-5">
       <Section
-        title="Games"
+        title="Experience library"
         hint={view === 'favorites' ? 'Your saved experiences' : 'Search every experience on Roblox'}
         actions={
           <Segmented
@@ -148,10 +159,11 @@ export default function GamesPanel() {
                   className="pointer-events-none absolute inset-y-0 my-auto ms-2.5 text-[var(--color-faint)]"
                 />
                 <Input
+                  aria-label="Search Roblox games"
                   className="!ps-8"
                   placeholder="Brookhaven, Doors, Blox Fruits…"
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => { request.current++; setQuery(e.target.value); setHits([]); setSearched(false); setLoading(false); setSearchError('') }}
                   onKeyDown={(e) => e.key === 'Enter' && void search()}
                   autoFocus
                 />
@@ -178,7 +190,8 @@ export default function GamesPanel() {
         )}
       </Section>
 
-      {cards.length === 0 ? (
+      <div className="selection-notice"><Users size={15} /><span>{usable.length ? `${usable.length} account(s) ready to launch` : 'Select an account with a saved session to launch a game. You can browse and save favourites first.'}</span></div>
+      {view === 'search' && loading ? <div role="status" className="py-12 text-center text-[var(--color-dim)]">Searching Roblox…</div> : view === 'search' && searchError ? <Empty icon={<Search size={18} />} title="Search unavailable" hint={searchError} action={<Button onClick={() => void search()}>Try again</Button>} /> : cards.length === 0 ? (
         <Empty
           icon={<Gamepad2 size={18} strokeWidth={1.75} />}
           title={view === 'favorites' ? 'No favourites yet' : searched ? 'Nothing found' : 'Search for a game'}
@@ -189,11 +202,12 @@ export default function GamesPanel() {
                 ? 'Try a shorter or differently spelled name.'
                 : 'Results come straight from the public Roblox catalogue — no account needed.'
           }
+          action={view === 'favorites' ? <Button onClick={() => setView('search')}>Find a game</Button> : undefined}
         />
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(158px,1fr))] gap-3">
           {cards.map((g) => (
-            <div key={`${g.placeId}-${g.universeId}`} className="group flex flex-col">
+            <div key={`${g.placeId}-${g.universeId}`} className="game-card group flex flex-col">
               <div className="relative overflow-hidden rounded-[12px] bg-[var(--color-raised)]">
                 {g.icon ? (
                   <img
@@ -208,12 +222,13 @@ export default function GamesPanel() {
                   </div>
                 )}
 
-                <div className="absolute inset-x-0 bottom-0 flex gap-1.5 bg-gradient-to-t from-black/80 to-transparent p-2 opacity-0 transition-opacity duration-150 ease-[var(--ease-out)] group-hover:opacity-100 group-focus-within:opacity-100">
+              </div>
+              <div className="game-actions">
                   <Button
-                    variant="primary"
+                    variant="soft"
                     className="!h-[28px] flex-1 !text-[12px]"
-                    onClick={() => void launch(g.placeId, g.name)}
-                    disabled={!usable.length}
+                    onClick={() => void launch(g.placeId, g.name, g.jobId)}
+                    disabled={!usable.length || launching}
                   >
                     <Play size={12} strokeWidth={2.5} />
                     Launch
@@ -223,7 +238,7 @@ export default function GamesPanel() {
                       aria-label={`Edit ${g.name}`}
                       title="Rename or pin a Job ID"
                       onClick={() => setEditing(presets.find((p) => p.placeId === g.placeId) ?? null)}
-                      className="grid h-[28px] w-[28px] shrink-0 place-items-center rounded-[8px] bg-black/55 text-white transition-[background-color,scale] duration-150 ease-[var(--ease-out)] hover:bg-black/75 active:scale-[0.96]"
+                      className="grid h-[28px] w-[28px] shrink-0 place-items-center rounded-[8px] bg-[var(--color-raised)] text-[var(--color-dim)] transition-[background-color,scale] duration-150 ease-[var(--ease-out)] hover:bg-[var(--color-hover)] active:scale-[0.96]"
                     >
                       <Pencil size={12} strokeWidth={2} />
                     </button>
@@ -232,7 +247,7 @@ export default function GamesPanel() {
                     aria-label={favouriteIds.has(g.placeId) ? `Unfavourite ${g.name}` : `Favourite ${g.name}`}
                     title={favouriteIds.has(g.placeId) ? 'Remove from favourites' : 'Add to favourites'}
                     onClick={() => void favourite(g)}
-                    className="grid h-[28px] w-[28px] shrink-0 place-items-center rounded-[8px] bg-black/55 text-white transition-[background-color,scale] duration-150 ease-[var(--ease-out)] hover:bg-black/75 active:scale-[0.96]"
+                    className="grid h-[28px] w-[28px] shrink-0 place-items-center rounded-[8px] bg-[var(--color-raised)] text-[var(--color-dim)] transition-[background-color,scale] duration-150 ease-[var(--ease-out)] hover:bg-[var(--color-hover)] active:scale-[0.96]"
                   >
                     <Star
                       size={13}
@@ -242,8 +257,6 @@ export default function GamesPanel() {
                     />
                   </button>
                 </div>
-              </div>
-
               <div className="mt-1.5 min-w-0">
                 <div className="truncate text-[12.5px] font-semibold" title={g.name}>
                   {g.name}
@@ -275,9 +288,14 @@ export default function GamesPanel() {
             <Button onClick={() => setEditing(null)}>Cancel</Button>
             <Button
               variant="primary"
-              onClick={() =>
-                void run('Saving', () => api.call('preset:save', editing), 'Saved').then(() => setEditing(null))
-              }
+              loading={saving}
+              onClick={async () => {
+                if (!editing?.name.trim()) return toast('err', 'Enter a name for this favourite.')
+                setSaving(true)
+                const saved = await run('Saving', async () => { await api.call('preset:save', editing); return true }, 'Favourite saved')
+                setSaving(false)
+                if (saved) setEditing(null)
+              }}
             >
               Save
             </Button>
@@ -287,12 +305,12 @@ export default function GamesPanel() {
         {editing && (
           <div className="grid gap-3">
             <div>
-              <Label>Name</Label>
-              <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+              <Label htmlFor="gamespanel-name">Name</Label>
+              <Input id="gamespanel-name" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             </div>
             <div>
-              <Label hint="Optional — always join this exact server">Job ID</Label>
-              <Input
+              <Label htmlFor="gamespanel-job-id" hint="Optional — always join this exact server">Job ID</Label>
+              <Input id="gamespanel-job-id"
                 className="num !text-[11.5px]"
                 value={editing.jobId ?? ''}
                 onChange={(e) => setEditing({ ...editing, jobId: e.target.value || undefined })}

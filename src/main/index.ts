@@ -7,7 +7,9 @@ import type {
   BulkImportResult,
   BulkLoginResult,
   LaunchTarget,
+  PlayerPresence,
   PlayerRelationship,
+  PlayerServer,
   Preset,
   PrivateServer,
   Settings,
@@ -307,6 +309,7 @@ async function addFromCookie(cookie: string, password?: string): Promise<Account
     existing.region = home
     if (password) existing.password = password
     await vault.save()
+    pushData()
     void refreshAccounts([info.userId]).catch(() => undefined)
     scheduleSync()
     return existing
@@ -333,6 +336,7 @@ async function addFromCookie(cookie: string, password?: string): Promise<Account
   d.accounts.push(acc)
   delete d.tombstones[String(info.userId)]
   await vault.save()
+  pushData()
   void refreshAccounts([info.userId]).catch(() => undefined)
   scheduleSync()
   return acc
@@ -395,6 +399,7 @@ async function runLaunch(userId: number, open: (settings: Settings) => Promise<v
     if (acc) {
       acc.lastLaunch = new Date().toISOString()
       await vault.save()
+      pushData()
     }
   })
 }
@@ -441,17 +446,38 @@ async function playerRelationships(userIds: number[], targetUserId: number): Pro
   )
 }
 
+async function playerPresences(userIds: number[], targetUserId: number): Promise<PlayerPresence[]> {
+  if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0) throw new Error('Invalid player User ID')
+  const viewers = userIds.length ? [...new Set(userIds)] : [null]
+  return Promise.all(viewers.map(async (userId) => {
+    try {
+      const result = await roblox.presences(userId === null ? undefined : vault.cookie(userId), [targetUserId])
+      const presence = result[targetUserId]
+      if (!presence || ![0, 1, 2, 3].includes(presence.type)) throw new Error('Roblox did not share this player’s activity.')
+      return { userId, presence }
+    } catch (e) {
+      return { userId, error: e instanceof Error ? e.message : String(e) }
+    }
+  }))
+}
+
 async function launchIntoPlayer(
   userIds: number[],
-  targetUserId: number
+  targetUserId: number,
+  expected?: PlayerServer
 ): Promise<{ userId: number; error: string }[]> {
   await warnIfSingleInstance(userIds.length)
   const failed: { userId: number; error: string }[] = []
   for (const userId of userIds) {
     try {
-      const where = await roblox.friendServer(vault.cookie(userId), targetUserId)
+      const where = await roblox.friendServer(vault.cookie(userId), targetUserId, expected)
       if (!where) throw new Error('That player is not in a joinable game right now')
-      await launchOne(userId, { placeId: where.placeId, jobId: where.gameId })
+      await runLaunch(userId, async (s) => {
+        // Recheck after waiting in the launch queue, keeping the displayed destination.
+        const current = await roblox.friendServer(vault.cookie(userId), targetUserId, expected ?? where)
+        if (!current) throw new Error('This player left the server or stopped sharing it. Refresh their activity.')
+        await launcher.launch(vault.cookie(userId), { placeId: current.placeId, jobId: current.gameId }, s.multiInstance, userId)
+      })
     } catch (e) {
       failed.push({ userId, error: e instanceof Error ? e.message : String(e) })
     }
@@ -759,9 +785,10 @@ function registerIpc(): void {
 
   handle('player:lookup', (query: string) => roblox.lookupPlayer(query), false)
   handle('player:status', (userIds: number[], targetUserId: number) => playerRelationships(userIds, targetUserId))
+  handle('player:presence', (userIds: number[], targetUserId: number) => playerPresences(userIds, targetUserId))
   handle('player:friend', (userIds: number[], targetUserId: number) => actOnPlayer(userIds, targetUserId, 'friend'))
   handle('player:follow', (userIds: number[], targetUserId: number) => actOnPlayer(userIds, targetUserId, 'follow'))
-  handle('launch:player', (userIds: number[], targetUserId: number) => launchIntoPlayer(userIds, targetUserId))
+  handle('launch:player', (userIds: number[], targetUserId: number, expected?: PlayerServer) => launchIntoPlayer(userIds, targetUserId, expected))
   handle('game:ping', (placeId: number) => launcher.ping(placeId))
   handle('game:recent', (userId: number) => roblox.recentGames(vault.cookie(userId)))
   handle('game:search', (query: string) => roblox.searchGames(query), false)

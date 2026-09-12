@@ -71,6 +71,18 @@ export interface PlayerProfile {
   avatarUrl?: string
 }
 
+export interface PlayerPresence {
+  /** Account whose session was used to check; null for public visibility. */
+  userId: number | null
+  presence?: Presence
+  error?: string
+}
+
+export interface PlayerServer {
+  placeId: number
+  gameId: string
+}
+
 export type PlayerFriendStatus = 'friend' | 'pending' | 'incoming' | 'none'
 
 export interface PlayerRelationship {

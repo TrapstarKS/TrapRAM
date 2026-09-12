@@ -24,7 +24,7 @@ export default function TitleBar({ bare }: { bare?: boolean }) {
   return (
     <header
       className="drag flex h-10 shrink-0 items-center gap-3 px-3 text-[12px]"
-      style={{ paddingInlineStart: mac ? 84 : 12 }}
+      style={{ paddingInlineStart: mac ? 84 : 12, paddingInlineEnd: mac ? 12 : 140 }}
     >
       <span className="font-semibold tracking-[-0.01em] text-[13px]">TrapRAM</span>
       {version ? <span className="num text-[var(--color-faint)]">v{version}</span> : null}
@@ -37,9 +37,9 @@ export default function TitleBar({ bare }: { bare?: boolean }) {
       )}
 
       {busy ? (
-        <span className="ml-auto flex items-center gap-2 text-[var(--color-dim)]">
+        <span role="status" className="ml-auto flex min-w-0 items-center gap-2 text-[var(--color-dim)]">
           <Loader2 size={13} strokeWidth={2} className="animate-spin" />
-          {busy}
+          <span className="truncate">{busy}</span>
         </span>
       ) : null}
     </header>

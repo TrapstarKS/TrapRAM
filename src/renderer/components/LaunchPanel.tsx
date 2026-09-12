@@ -15,8 +15,9 @@ import {
   UserPlus,
   HeartHandshake
 } from 'lucide-react'
-import type { PlayerProfile, PlayerRelationship, Preset, RecentGame } from '@shared/types'
-import { useStore, visibleAccounts } from '../store'
+import type { PlayerPresence, PlayerProfile, PlayerRelationship, Preset, RecentGame } from '@shared/types'
+import { useStore, visibleAccounts, readyAccounts } from '../store'
+import { parsePlaceId, playerServer } from '@shared/plain'
 import { api, relative } from '../lib/api'
 import { Button, Input, Label, Empty, Section } from './ui'
 
@@ -29,18 +30,20 @@ interface GameMeta {
 
 export default function LaunchPanel() {
   const store = useStore()
-  const { selected, accounts, presets, settings, withCookie, run, toast, setTab, patchSettings } = store
+  const { selected, accounts, presets, settings, withCookie, run, toast, setTab, patchSettings, launch: runLaunch, launching } = store
   const [placeId, setPlaceId] = useState('')
   const [jobId, setJobId] = useState('')
   const seeded = useRef(false)
   const [meta, setMeta] = useState<GameMeta | null>(null)
   const [resolving, setResolving] = useState(false)
+  const [resolveError, setResolveError] = useState('')
   const [recentAccountId, setRecentAccountId] = useState<number | null>(null)
   const [recentGames, setRecentGames] = useState<RecentGame[]>([])
   const [recentLoading, setRecentLoading] = useState(false)
   const [recentError, setRecentError] = useState<string | null>(null)
   const [recentReload, setRecentReload] = useState(0)
   const [playerQuery, setPlayerQuery] = useState('')
+  const playerRequest = useRef(0)
   const [player, setPlayer] = useState<PlayerProfile | null>(null)
   const [playerLoading, setPlayerLoading] = useState(false)
   const [playerError, setPlayerError] = useState<string | null>(null)
@@ -49,6 +52,9 @@ export default function LaunchPanel() {
   const [relationshipLoading, setRelationshipLoading] = useState(false)
   const [relationshipError, setRelationshipError] = useState<string | null>(null)
   const [relationshipReload, setRelationshipReload] = useState(0)
+  const [relationshipKey, setRelationshipKey] = useState('')
+  const [activityReload, setActivityReload] = useState(0)
+  const [activity, setActivity] = useState<{ key: string; rows: PlayerPresence[]; loading: boolean; checkedAt?: number; error?: string } | null>(null)
 
   useEffect(() => {
     if (seeded.current || !settings) return
@@ -57,17 +63,45 @@ export default function LaunchPanel() {
   }, [settings])
 
   const chosen = accounts.filter((a) => selected.includes(a.userId))
-  const usable = chosen.filter((a) => !a.cookieExpired)
-  const numericPlace = Number(placeId.replace(/\D/g, ''))
+  const usable = readyAccounts(store)
+  const numericPlace = parsePlaceId(placeId)
   const recentAccount = accounts.find((a) => a.userId === recentAccountId)
   const recentUserId = recentAccount?.userId ?? 0
   const recentExpired = recentAccount?.cookieExpired ?? false
   const recentHasCookie = recentAccount ? withCookie.includes(recentAccount.userId) : false
   const socialAccounts = usable.filter((a) => withCookie.includes(a.userId))
   const socialAccountIds = socialAccounts.map((a) => a.userId).join(',')
+  const activityKey = `${player?.userId ?? ''}:${socialAccountIds}`
+  const activityRows = activity?.key === activityKey ? activity.rows : []
+  const activityLoading = activity?.key !== activityKey || activity.loading
+  const presence = activityRows.find(row => playerServer(row.presence))?.presence
+    ?? activityRows.find(row => row.presence?.type === 2 && (row.presence.placeId || row.presence.lastLocation))?.presence
+    ?? activityRows.find(row => row.presence?.type === 2)?.presence
+    ?? activityRows.find(row => row.presence && row.presence.type !== 0)?.presence
+    ?? activityRows.find(row => row.presence)?.presence
+  const destination = playerServer(presence)
+  const joinTargets = socialAccounts.filter(account => {
+    const server = playerServer(activityRows.find(row => row.userId === account.userId)?.presence)
+    return server && server.placeId === destination?.placeId && server.gameId === destination.gameId
+  })
+  const canJoinPlayer = !activityLoading && !!destination && joinTargets.length > 0
+  const activityFailure = activity?.key === activityKey ? activity.error ?? activityRows.find(row => row.error)?.error : undefined
+  const activityLabel = activityLoading && !presence ? 'Checking activity…'
+    : presence?.type === 2 ? 'In game'
+      : presence?.type === 1 ? 'Online'
+        : presence?.type === 0 ? 'Offline'
+          : presence?.type === 3 ? 'In Roblox Studio' : 'Activity unavailable'
+  const activityHint = !presence ? activityLoading ? 'Looking up this player’s current activity.' : activityFailure ?? 'Roblox did not share this player’s activity.'
+    : presence.type === 0 ? 'Roblox reports this player as offline. There is no server to join.'
+      : presence.type === 1 ? 'This player is online, but is not in an experience.'
+        : presence.type === 3 ? 'This player is using Studio, not a playable server.'
+          : !destination ? 'Roblox has not shared a server you can join. Visibility may depend on this player’s privacy settings.'
+            : !socialAccounts.length ? 'Select an account with a valid session to check whether it can join.'
+              : `${joinTargets.length} of ${socialAccounts.length} selected accounts can see this server. ${joinTargets.length < socialAccounts.length ? 'Only these accounts will join. ' : ''}Availability is checked again when you join.`
   const relationshipByUser = new Map(playerRelationships.map((relationship) => [relationship.userId, relationship]))
   const relationshipsReady =
     !!player &&
+    relationshipKey === activityKey &&
     !relationshipLoading &&
     playerRelationships.length === socialAccounts.length &&
     playerRelationships.every((relationship) => !relationship.error)
@@ -94,13 +128,12 @@ export default function LaunchPanel() {
             : 'Friend request'
 
   useEffect(() => {
-    const currentExists = recentAccountId !== null && accounts.some((a) => a.userId === recentAccountId)
-    const followsSingleSelection = selected.length === 1 && selected[0] !== recentAccountId
-    const followsMultiSelection = selected.length > 1 && !selected.includes(recentAccountId ?? -1)
-    if ((!currentExists || followsSingleSelection || followsMultiSelection) && accounts.length) {
-      setRecentAccountId(selected[0] ?? accounts[0].userId)
-    }
-  }, [accounts, recentAccountId, selected])
+    if (selected.length) setRecentAccountId(selected[0])
+  }, [selected.join(',')])
+
+  useEffect(() => {
+    setRecentAccountId(current => accounts.some(a => a.userId === current) ? current : accounts[0]?.userId ?? null)
+  }, [accounts])
 
   useEffect(() => {
     let cancelled = false
@@ -162,7 +195,7 @@ export default function LaunchPanel() {
     void api
       .call<PlayerRelationship[]>('player:status', socialAccounts.map((a) => a.userId), player.userId)
       .then((relationships) => {
-        if (!cancelled) setPlayerRelationships(relationships)
+        if (!cancelled) { setPlayerRelationships(relationships); setRelationshipKey(activityKey) }
       })
       .catch((error: unknown) => {
         if (!cancelled) setRelationshipError(error instanceof Error ? error.message : 'Could not check player status')
@@ -183,8 +216,33 @@ export default function LaunchPanel() {
   }, [player?.userId, socialAccountIds])
 
   useEffect(() => {
+    if (!player) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    const targetUserId = player.userId
+    const ids = socialAccounts.map(account => account.userId)
+    async function refreshActivity() {
+      setActivity(previous => ({ key: activityKey, rows: previous?.key === activityKey ? previous.rows : [], loading: true }))
+      try {
+        const rows = await api.call<PlayerPresence[]>('player:presence', ids, targetUserId)
+        if (!cancelled) setActivity({ key: activityKey, rows, loading: false, checkedAt: Date.now() })
+      } catch (error) {
+        if (!cancelled) setActivity({ key: activityKey, rows: [], loading: false, error: error instanceof Error ? error.message : 'Could not check player activity.' })
+      } finally {
+        if (!cancelled) timer = setTimeout(() => void refreshActivity(), 15_000)
+      }
+    }
+    void refreshActivity()
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [activityKey, activityReload])
+
+  useEffect(() => () => { playerRequest.current += 1 }, [])
+
+  useEffect(() => {
     setMeta(null)
-    if (!numericPlace || String(numericPlace).length < 5) return
+    setResolving(false)
+    setResolveError('')
+    if (!numericPlace) return
     let cancelled = false
     setResolving(true)
     const t = setTimeout(async () => {
@@ -196,7 +254,7 @@ export default function LaunchPanel() {
           void patchSettings({ lastPlaceId: numericPlace })
         }
       } catch {
-        if (!cancelled) setMeta(null)
+        if (!cancelled) setResolveError('Could not load this experience. Check the link or Place ID and try again.')
       } finally {
         if (!cancelled) setResolving(false)
       }
@@ -213,10 +271,10 @@ export default function LaunchPanel() {
 
     const target = { placeId: numericPlace, jobId: jobId.trim() || undefined }
     if (usable.length === 1) {
-      await run('Launching', () => api.call('launch:one', usable[0].userId, target), `Launching ${usable[0].username}`)
+      await runLaunch('Launching', () => api.call('launch:one', usable[0].userId, target), `Launching ${settings?.anonymize ? 'account' : usable[0].username}`)
       return
     }
-    const failed = await run(`Launching ${usable.length} accounts`, () =>
+    const failed = await runLaunch(`Launching ${usable.length} accounts`, () =>
       api.call<{ userId: number; error: string }[]>(
         'launch:many',
         usable.map((a) => a.userId),
@@ -261,14 +319,14 @@ export default function LaunchPanel() {
   }
 
   async function launchRecent(game: RecentGame) {
-    const targets = usable.length
+    const targets = selected.length
       ? usable
       : recentAccount && !recentExpired && recentHasCookie
         ? [recentAccount]
         : []
     if (!targets.length) return toast('err', 'Select an account with a valid session first')
 
-    const failed = await run('Launching recent game', () =>
+    const failed = await runLaunch('Launching recent game', () =>
       api.call<{ userId: number; error: string }[]>('launch:many', targets.map((a) => a.userId), {
         placeId: game.placeId
       })
@@ -280,17 +338,20 @@ export default function LaunchPanel() {
     const query = playerQuery.trim()
     if (!query) return toast('err', 'Enter a username or User ID')
 
+    const request = ++playerRequest.current
     setPlayerLoading(true)
     setPlayer(null)
+    setActivity(null)
     setPlayerError(null)
     try {
       const result = await api.call<PlayerProfile | null>('player:lookup', query)
+      if (request !== playerRequest.current) return
       if (result) setPlayer(result)
       else setPlayerError('Player not found')
     } catch (error: unknown) {
-      setPlayerError(error instanceof Error ? error.message : 'Could not find that player')
+      if (request === playerRequest.current) setPlayerError(error instanceof Error ? error.message : 'Could not find that player')
     } finally {
-      setPlayerLoading(false)
+      if (request === playerRequest.current) setPlayerLoading(false)
     }
   }
 
@@ -298,14 +359,15 @@ export default function LaunchPanel() {
     if (!player) return toast('err', 'Find a player first')
     if (!socialAccounts.length) return toast('err', 'Select at least one account with a valid session')
     if (action !== 'join' && !relationshipsReady) return toast('info', 'Still checking this player relationship')
+    if (action === 'join' && !canJoinPlayer) return toast('info', 'Check this player’s activity before joining')
 
-    const targetAccounts = action === 'friend' ? friendTargets : action === 'follow' ? followTargets : socialAccounts
+    const targetAccounts = action === 'friend' ? friendTargets : action === 'follow' ? followTargets : joinTargets
     if (!targetAccounts.length) {
       return toast('info', action === 'friend' ? 'All selected accounts are already friends' : 'All selected accounts already follow this player')
     }
 
     setPlayerAction(action)
-    const failed = await run(`Player ${action}`, () => {
+    const failed = await (action === 'join' ? runLaunch : run)(`Player ${action}`, () => {
       const ids = targetAccounts.map((a) => a.userId)
       if (action === 'friend') {
         return api.call<{ userId: number; error: string }[]>('player:friend', ids, player.userId)
@@ -313,9 +375,10 @@ export default function LaunchPanel() {
       if (action === 'follow') {
         return api.call<{ userId: number; error: string }[]>('player:follow', ids, player.userId)
       }
-      return api.call<{ userId: number; error: string }[]>('launch:player', ids, player.userId)
+      return api.call<{ userId: number; error: string }[]>('launch:player', ids, player.userId, destination)
     })
     setPlayerAction(null)
+    if (action === 'join') setActivityReload(value => value + 1)
     if (!failed) return
     if (action !== 'join') setRelationshipReload((value) => value + 1)
 
@@ -334,49 +397,49 @@ export default function LaunchPanel() {
   }
 
   async function joinAccount(targetUserId: number) {
-    if (!usable.length) return toast('err', 'Select the accounts that should join')
-    for (const a of usable) {
-      if (a.userId === targetUserId) continue
-      await run(`Following into server`, () => api.call('launch:follow', a.userId, targetUserId))
-    }
-    toast('ok', 'Join requested')
+    const targets = usable.filter(a => a.userId !== targetUserId)
+    if (!targets.length) return toast('info', 'Select another account to join this server')
+    const failed = await runLaunch('Joining account', () => api.call<{ error: string }[]>('launch:player', targets.map(a => a.userId), targetUserId))
+    if (failed) toast(failed.length ? 'err' : 'ok', failed.length ? `${failed.length} failed — ${failed[0].error}` : 'Join requested')
   }
 
   const inGame = visibleAccounts(store).filter((a) => a.presence.type === 2 && a.presence.gameId)
 
   return (
     <div className="p-5">
+      <div className="launch-card mb-7">
       <Section
-        title="Launch"
+        title="Launch an experience"
         hint={
           chosen.length
             ? `${usable.length} of ${chosen.length} selected account${chosen.length === 1 ? '' : 's'} ready`
-            : 'Select accounts in the list on the left'
+            : 'Start by selecting an account in the Accounts panel'
         }
       >
         <div className="grid gap-3">
-          <div className="grid grid-cols-[1fr_auto] gap-3">
+          <div className="launch-fields">
             <div>
-              <Label hint="The number in a Roblox experience URL">Place ID</Label>
+              <Label htmlFor="launchpanel-place-id" hint="Paste a Roblox game link or its Place ID">Experience</Label>
               <div className="relative">
                 <Search
                   size={14}
                   strokeWidth={1.75}
                   className="pointer-events-none absolute inset-y-0 my-auto ms-2.5 text-[var(--color-faint)]"
                 />
-                <Input
+                <Input id="launchpanel-place-id"
                   className="!ps-8 num"
-                  inputMode="numeric"
-                  placeholder="e.g. 920587237"
+                  placeholder="roblox.com/games/… or Place ID"
+                  aria-invalid={!!placeId.trim() && !numericPlace}
+                  aria-describedby={placeId.trim() && !numericPlace ? 'place-error' : undefined}
                   value={placeId}
                   onChange={(e) => setPlaceId(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && void launch()}
                 />
               </div>
             </div>
-            <div className="w-[230px]">
-              <Label hint="Optional — joins one exact server">Job ID</Label>
-              <Input
+            <div>
+              <Label htmlFor="launchpanel-job-id" hint="Optional — joins one exact server">Job ID</Label>
+              <Input id="launchpanel-job-id"
                 className="num !text-[11.5px]"
                 placeholder="Leave empty for any server"
                 value={jobId}
@@ -385,6 +448,8 @@ export default function LaunchPanel() {
               />
             </div>
           </div>
+          {placeId.trim() && !numericPlace && <p id="place-error" role="alert" className="text-[12px] text-[var(--color-bad)]">Enter a positive Place ID or a full https://www.roblox.com/games/… link.</p>}
+          {resolveError && <p role="alert" className="text-[12px] text-[var(--color-bad)]">{resolveError}</p>}
 
           {(meta || resolving) && (
             <div className="flex items-center gap-3 rounded-[10px] bg-[var(--color-raised)] p-2.5">
@@ -404,6 +469,7 @@ export default function LaunchPanel() {
               <Button
                 className="!h-[28px] !text-[12px]"
                 onClick={() => {
+                  if (!numericPlace) return
                   void patchSettings({ lastPlaceId: numericPlace })
                   setTab('servers')
                 }}
@@ -418,7 +484,7 @@ export default function LaunchPanel() {
 
           {settings && !settings.multiInstance && (
             <div
-              className="flex items-center gap-2.5 rounded-[10px] px-3 py-2.5"
+                className="flex flex-wrap items-center gap-2.5 rounded-[10px] px-3 py-2.5"
               style={{ background: 'oklch(0.79 0.152 78 / 0.12)', boxShadow: 'inset 0 0 0 1px oklch(0.79 0.152 78 / 0.28)' }}
             >
               <Layers size={15} strokeWidth={1.75} style={{ color: 'var(--color-warn)' }} className="shrink-0" />
@@ -435,7 +501,7 @@ export default function LaunchPanel() {
           )}
 
           <div className="flex items-center gap-2">
-            <Button variant="primary" className="!h-[36px] flex-1" onClick={() => void launch()} disabled={!usable.length}>
+            <Button variant="primary" className="!min-h-[42px] flex-1" onClick={() => void launch()} loading={launching} disabled={!usable.length || !numericPlace}>
               <Play size={15} strokeWidth={2.25} />
               {usable.length > 1 ? `Launch ${usable.length} accounts` : 'Launch'}
             </Button>
@@ -445,8 +511,10 @@ export default function LaunchPanel() {
               </span>
             )}
           </div>
+          {chosen.length > usable.length && <p className="text-[12px] text-[var(--color-warn)]">{chosen.length - usable.length} selected account(s) need a new sign-in and will be skipped. Use Add account to sign in again.</p>}
         </div>
       </Section>
+      </div>
 
       {presets.length > 0 && (
         <Section
@@ -488,7 +556,7 @@ export default function LaunchPanel() {
         title="Recently played"
         hint={
           recentAccount
-            ? `The 8 latest experiences from ${recentAccount.alias || recentAccount.username}`
+            ? `The 8 latest experiences from ${settings?.anonymize ? 'your account' : recentAccount.alias || recentAccount.username}`
             : 'Select an account to see its recent experiences'
         }
         actions={
@@ -505,7 +573,7 @@ export default function LaunchPanel() {
               >
                 {accounts.map((a) => (
                   <option key={a.userId} value={a.userId}>
-                    {a.alias || a.username}
+                    {settings?.anonymize ? `Account ${accounts.indexOf(a) + 1}` : a.alias || a.username}
                   </option>
                 ))}
               </select>
@@ -603,7 +671,7 @@ export default function LaunchPanel() {
                     title="Launch"
                     className="grid h-[27px] w-[27px] shrink-0 place-items-center rounded-[8px] bg-[var(--color-accent)] text-white transition-[background-color,scale] duration-150 ease-[var(--ease-out)] hover:bg-[oklch(0.7_0.196_288)] active:scale-[0.96] disabled:opacity-40"
                     onClick={() => void launchRecent(game)}
-                    disabled={!usable.length && (!recentAccount || recentExpired || !recentHasCookie)}
+                    disabled={launching || (selected.length ? !usable.length : !recentAccount || recentExpired || !recentHasCookie)}
                   >
                     <Play size={12} strokeWidth={2.5} />
                   </button>
@@ -627,12 +695,16 @@ export default function LaunchPanel() {
                 className="pointer-events-none absolute inset-y-0 my-auto ms-2.5 text-[var(--color-faint)]"
               />
               <Input
+                aria-label="Player username or User ID"
                 className="!ps-8"
                 placeholder="Username or User ID"
                 value={playerQuery}
                 onChange={(e) => {
+                  playerRequest.current += 1
+                  setPlayerLoading(false)
                   setPlayerQuery(e.target.value)
                   setPlayer(null)
+                  setActivity(null)
                   setPlayerError(null)
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && void lookupPlayer()}
@@ -649,7 +721,7 @@ export default function LaunchPanel() {
           </div>
 
           {playerError ? (
-            <div className="flex items-center gap-2 rounded-[10px] bg-[var(--color-raised)] px-3 py-2.5 text-[12px] text-[var(--color-dim)]">
+            <div role="alert" className="flex items-center gap-2 rounded-[10px] bg-[var(--color-raised)] px-3 py-2.5 text-[12px] text-[var(--color-dim)]">
               <UserRoundSearch size={15} strokeWidth={1.75} className="shrink-0 text-[var(--color-faint)]" />
               <span>{playerError}</span>
             </div>
@@ -657,7 +729,7 @@ export default function LaunchPanel() {
 
           {player ? (
             <div className="grid gap-2.5">
-              <div className="flex items-center gap-3 rounded-[10px] bg-[var(--color-raised)] p-2.5">
+              <div className="flex flex-wrap items-center gap-3 rounded-[10px] bg-[var(--color-raised)] p-2.5">
                 {player.avatarUrl ? (
                   <img src={player.avatarUrl} alt="" width={36} height={36} className="avatar h-9 w-9 rounded-full" />
                 ) : (
@@ -665,7 +737,7 @@ export default function LaunchPanel() {
                     <UserRoundSearch size={16} strokeWidth={1.75} />
                   </div>
                 )}
-                <div className="min-w-0 flex-1">
+                <div className="min-w-[100px] flex-1">
                   <div className="truncate text-[13px] font-semibold">{player.displayName || player.username}</div>
                   <div className="num truncate text-[11.5px] text-[var(--color-faint)]">
                     @{player.username} · {player.userId}
@@ -674,6 +746,29 @@ export default function LaunchPanel() {
                 <span className="shrink-0 text-[11.5px] text-[var(--color-faint)]">
                   {socialAccounts.length} account{socialAccounts.length === 1 ? '' : 's'} ready
                 </span>
+              </div>
+              <div className="rounded-[10px] border border-[var(--color-line)] p-3" aria-label="Player activity" role="region">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1" role="status">
+                    <div className="flex items-center gap-2 text-[12px] font-semibold">
+                      <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ background: presence?.type === 2 ? 'var(--color-ok)' : presence?.type === 1 || presence?.type === 3 ? 'var(--color-accent)' : 'var(--color-faint)' }} />
+                      {activityLabel}
+                    </div>
+                    {presence?.type === 2 && (
+                      <div className="mt-2">
+                        <p className="break-words text-[14px] font-semibold">{presence.lastLocation.trim() || 'Experience not shared'}</p>
+                        {!!presence.placeId && <p className="num mt-0.5 text-[11.5px] text-[var(--color-faint)]">Place ID: {presence.placeId}</p>}
+                      </div>
+                    )}
+                    <p id="player-join-hint" className="mt-1.5 break-words text-[12px] leading-relaxed text-[var(--color-dim)]">{activityHint}</p>
+                  </div>
+                  <Button type="button" aria-label="Refresh player activity" title="Refresh player activity" className="!h-8 !w-8 shrink-0 !p-0" disabled={activityLoading} onClick={() => setActivityReload(value => value + 1)}>
+                    <RefreshCw size={14} className={activityLoading ? 'animate-spin' : ''} />
+                  </Button>
+                </div>
+                <p className="mt-2 text-[11px] text-[var(--color-faint)]">
+                  {activityLoading ? 'Checking now…' : activity?.key === activityKey && activity.checkedAt ? `Checked at ${new Date(activity.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · Refreshes every 15s` : 'Use refresh to try again'}
+                </p>
               </div>
               {relationshipFailure ? (
                 <div className="flex items-center gap-2 rounded-[10px] bg-[var(--color-raised)] px-3 py-2 text-[11.5px] text-[var(--color-dim)]">
@@ -709,7 +804,7 @@ export default function LaunchPanel() {
                   ) : null}
                 </div>
               )}
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2">
                 <Button
                   type="button"
                   loading={playerAction === 'friend'}
@@ -739,7 +834,8 @@ export default function LaunchPanel() {
                 <Button
                   type="button"
                   loading={playerAction === 'join'}
-                  disabled={!socialAccounts.length || playerAction !== null}
+                  disabled={!canJoinPlayer || playerAction !== null || launching}
+                  aria-describedby="player-join-hint"
                   onClick={() => void actOnPlayer('join')}
                 >
                   <Rocket size={14} strokeWidth={1.9} />
@@ -762,16 +858,16 @@ export default function LaunchPanel() {
           <div className="grid gap-1.5">
             {inGame.map((a) => (
               <div key={a.userId} className="flex items-center gap-3 rounded-[10px] bg-[var(--color-raised)] p-2">
-                {a.avatarUrl ? (
+                {a.avatarUrl && !settings?.anonymize ? (
                   <img src={a.avatarUrl} alt="" width={28} height={28} className="avatar h-7 w-7 rounded-full" />
                 ) : (
                   <div className="avatar h-7 w-7 rounded-full bg-[var(--color-hover)]" />
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12.5px] font-semibold">{a.alias || a.username}</div>
+                  <div className="truncate text-[12.5px] font-semibold">{settings?.anonymize ? `Account ${accounts.indexOf(a) + 1}` : a.alias || a.username}</div>
                   <div className="truncate text-[11px] text-[var(--color-faint)]">{a.presence.lastLocation}</div>
                 </div>
-                <Button className="!h-[28px] !text-[12px]" onClick={() => void joinAccount(a.userId)} disabled={!usable.length}>
+                <Button className="!h-[28px] !text-[12px]" onClick={() => void joinAccount(a.userId)} disabled={launching || !usable.some(other => other.userId !== a.userId)}>
                   <Rocket size={13} strokeWidth={1.75} />
                   Join
                 </Button>
@@ -787,7 +883,7 @@ export default function LaunchPanel() {
             {chosen.map((a) => (
               <div key={a.userId} className="flex items-center gap-2 px-1 py-1 text-[12px]">
                 <MousePointerClick size={12} strokeWidth={1.75} className="text-[var(--color-faint)]" />
-                <span className="truncate font-medium">{a.alias || a.username}</span>
+                <span className="truncate font-medium">{settings?.anonymize ? `Account ${accounts.indexOf(a) + 1}` : a.alias || a.username}</span>
                 <span className="ms-auto shrink-0 text-[11.5px] text-[var(--color-faint)]">
                   {a.cookieExpired ? 'session expired' : relative(a.lastLaunch)}
                 </span>

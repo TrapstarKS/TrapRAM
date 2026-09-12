@@ -1,3 +1,5 @@
+import type { PlayerServer, Presence } from './types'
+
 export function reorderIds(ids: number[], from: number, target: number): number[] | null {
   const at = ids.indexOf(from)
   const to = ids.indexOf(target)
@@ -5,6 +7,20 @@ export function reorderIds(ids: number[], from: number, target: number): number[
   const next = ids.filter((id) => id !== from)
   next.splice(next.indexOf(target) + (to > at ? 1 : 0), 0, from)
   return next
+}
+
+export function parsePlaceId(raw: string): number | null {
+  const text = raw.trim()
+  let digits = text
+  if (!/^\d+$/.test(text)) {
+    try {
+      const url = new URL(text)
+      if (url.protocol !== 'https:' || !['roblox.com', 'www.roblox.com'].includes(url.hostname)) return null
+      digits = url.pathname.match(/^\/games\/(\d+)(?:\/|$)/)?.[1] ?? ''
+    } catch { return null }
+  }
+  const id = Number(digits)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
 }
 
 export function utcMillis(iso: string): number {
@@ -36,4 +52,13 @@ export function parseBulkLines(raw: string): BulkLine[] {
     lines.push({ kind: 'cookie', value: line })
   }
   return lines
+}
+
+export function playerServer(presence?: Presence, expected?: PlayerServer): PlayerServer | null {
+  if (presence?.type !== 2 || typeof presence.placeId !== 'number' || !Number.isSafeInteger(presence.placeId) || presence.placeId <= 0 || typeof presence.gameId !== 'string' || !presence.gameId.trim()) return null
+  const server = { placeId: presence.placeId, gameId: presence.gameId }
+  if (expected && (server.placeId !== expected.placeId || server.gameId !== expected.gameId)) {
+    throw new Error('This player changed games or servers. Refresh their activity before joining.')
+  }
+  return server
 }
