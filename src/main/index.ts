@@ -834,6 +834,7 @@ function registerIpc(): void {
   handle('settings:set', async (patch: Partial<Settings>) => {
     const next = store.set(patch)
     if (patch.autoLockMinutes !== undefined) vault.setAutoLock(next.autoLockMinutes)
+    if (patch.autoUpdate !== undefined) updater.configureAutomaticChecks(next.autoUpdate)
     if (patch.presencePollSeconds !== undefined) startPresenceLoop()
     if (patch.autoRefreshCookies !== undefined) startRefreshLoop()
     if (patch.syncAuto !== undefined || patch.syncIntervalMin !== undefined) startSyncLoop()

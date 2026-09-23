@@ -57,6 +57,28 @@ function harden(ses: Session): void {
   })
 }
 
+function disposeSession(ses: Session): void {
+  ses.setPermissionRequestHandler(null)
+  ses.setPermissionCheckHandler(null)
+  ses.webRequest.onBeforeSendHeaders(null)
+  ses.webRequest.onBeforeRequest(null)
+
+  for (const extension of ses.getAllExtensions()) {
+    try {
+      ses.removeExtension(extension.id)
+    } catch {}
+  }
+
+  void ses
+    .closeAllConnections()
+    .catch(() => undefined)
+    .then(() => ses.clearData().catch(() => undefined))
+}
+
+function closeView(view: WebContentsView): void {
+  if (!view.webContents.isDestroyed()) view.webContents.close({ waitForBeforeUnload: false })
+}
+
 function guardNavigation(view: { webContents: Electron.WebContents }, onRobloxLaunch?: (url: string) => void): void {
   const open = (url: string): void => {
     if ((isRobloxLaunch(url) || isRobloxDeepLink(url)) && onRobloxLaunch) {
@@ -179,9 +201,10 @@ export async function openLogin(
     const finish = (cookie: string | null) => {
       if (settled) return
       settled = true
-      ses.clearStorageData().catch(() => undefined)
+      ses.cookies.removeListener('changed', onCookieChanged)
       resolve(cookie ? { cookie, password } : null)
       if (!win.isDestroyed()) win.destroy()
+      disposeSession(ses)
     }
 
     const check = async () => {
@@ -191,9 +214,10 @@ export async function openLogin(
       if (value) finish(value)
     }
 
-    ses.cookies.on('changed', (_e, cookie, _cause, removed) => {
+    const onCookieChanged = (_e: Electron.Event, cookie: Electron.Cookie, _cause: string, removed: boolean) => {
       if (!removed && cookie.name === '.ROBLOSECURITY') void check()
-    })
+    }
+    ses.cookies.on('changed', onCookieChanged)
     win.webContents.on('did-navigate', () => void check())
     win.on('closed', () => finish(null))
     void win.loadURL(prefill ? SIGNIN_URL : LOGIN_URL).catch(() => finish(null))
@@ -307,8 +331,10 @@ export async function openBrowseAs(opts: {
   const record: BrowseWindow = { win, content, toolbar }
   browseWindows.set(opts.userId, record)
   win.on('closed', () => {
-    browseWindows.delete(opts.userId)
-    void ses.clearStorageData().catch(() => undefined)
+    if (browseWindows.get(opts.userId) === record) browseWindows.delete(opts.userId)
+    closeView(content)
+    closeView(toolbar)
+    disposeSession(ses)
   })
 
   guardNavigation(content, opts.onRobloxLaunch)

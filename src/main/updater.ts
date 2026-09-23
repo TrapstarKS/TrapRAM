@@ -6,6 +6,9 @@ const { autoUpdater } = pkg
 
 let state: UpdateState = { status: 'idle' }
 let target: BrowserWindow | null = null
+let attached = false
+let initialCheckTimer: NodeJS.Timeout | null = null
+let periodicCheckTimer: NodeJS.Timeout | null = null
 
 function push(next: UpdateState): void {
   state = next
@@ -22,29 +25,47 @@ export function attach(win: BrowserWindow, auto: boolean): void {
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.allowPrerelease = false
 
-  const held = (): boolean => state.status === 'ready' || state.status === 'downloading'
+  if (!attached) {
+    const held = (): boolean => state.status === 'ready' || state.status === 'downloading'
 
-  autoUpdater.on('checking-for-update', () => {
-    if (!held()) push({ status: 'checking' })
-  })
-  autoUpdater.on('update-available', (i) => {
-    if (held()) return
-    push({
-      status: 'available',
-      version: i.version,
-      notes: typeof i.releaseNotes === 'string' ? i.releaseNotes : undefined
+    autoUpdater.on('checking-for-update', () => {
+      if (!held()) push({ status: 'checking' })
     })
+    autoUpdater.on('update-available', (i) => {
+      if (held()) return
+      push({
+        status: 'available',
+        version: i.version,
+        notes: typeof i.releaseNotes === 'string' ? i.releaseNotes : undefined
+      })
+    })
+    autoUpdater.on('update-not-available', () => {
+      if (!held()) push({ status: 'none' })
+    })
+    autoUpdater.on('download-progress', (p) => push({ ...state, status: 'downloading', percent: Math.round(p.percent) }))
+    autoUpdater.on('update-downloaded', (i) => push({ status: 'ready', version: i.version }))
+    autoUpdater.on('error', (e) => push({ status: 'error', error: e?.message ?? String(e) }))
+    attached = true
+  }
+
+  win.once('closed', () => {
+    if (target === win) target = null
   })
-  autoUpdater.on('update-not-available', () => {
-    if (!held()) push({ status: 'none' })
-  })
-  autoUpdater.on('download-progress', (p) => push({ ...state, status: 'downloading', percent: Math.round(p.percent) }))
-  autoUpdater.on('update-downloaded', (i) => push({ status: 'ready', version: i.version }))
-  autoUpdater.on('error', (e) => push({ status: 'error', error: e?.message ?? String(e) }))
+
+  configureAutomaticChecks(auto)
+}
+
+export function configureAutomaticChecks(auto: boolean): void {
+  if (initialCheckTimer) clearTimeout(initialCheckTimer)
+  if (periodicCheckTimer) clearInterval(periodicCheckTimer)
+  initialCheckTimer = null
+  periodicCheckTimer = null
 
   if (auto && app.isPackaged) {
-    setTimeout(() => void check(), 4000)
-    setInterval(() => void check(), 6 * 60 * 60 * 1000).unref()
+    initialCheckTimer = setTimeout(() => void check(), 4000)
+    initialCheckTimer.unref()
+    periodicCheckTimer = setInterval(() => void check(), 6 * 60 * 60 * 1000)
+    periodicCheckTimer.unref()
   }
 }
 

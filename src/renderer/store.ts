@@ -34,6 +34,7 @@ interface State extends Snapshot {
 
 const emptySnapshot: Snapshot = { accounts: [], groups: [], presets: [], servers: [], withCookie: [] }
 const operations = new Map<symbol, string>()
+const MAX_TOASTS = 50
 let hydration = 0
 
 export const useStore = create<State>((set, get) => ({
@@ -73,7 +74,7 @@ export const useStore = create<State>((set, get) => ({
 
   toast: (kind, text) => {
     const id = Math.random().toString(36).slice(2)
-    set({ toasts: [...get().toasts, { id, kind, text }] })
+    set({ toasts: [...get().toasts, { id, kind, text }].slice(-MAX_TOASTS) })
     if (kind !== 'err') setTimeout(() => get().dismiss(id), 5000)
   },
   dismiss: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),

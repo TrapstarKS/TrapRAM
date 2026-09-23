@@ -78,6 +78,24 @@ require(${JSON.stringify(resolve('out/main/index.js'))});`)
   assert.equal(publicRows[0].userId, null)
   assert.equal(publicRows[0].presence.lastLocation, 'Blox Fruits')
   await page.evaluate(() => window.api.call('account:addCookie', 'synthetic-smoke-session'))
+
+  const webContentsBeforeBrowse = await app.evaluate(({ webContents }) => webContents.getAllWebContents().length)
+  await page.evaluate(() => window.api.call('account:browse', 901, 'data:text/html,<title>TrapRAM smoke browser</title>'))
+  const webContentsWithBrowse = await app.evaluate(({ webContents }) => webContents.getAllWebContents().length)
+  assert.ok(webContentsWithBrowse >= webContentsBeforeBrowse + 2, 'browser view must create content and toolbar webContents')
+  await app.evaluate(({ BaseWindow, BrowserWindow }) => {
+    const main = BrowserWindow.getAllWindows()[0]
+    const browser = BaseWindow.getAllWindows().find(window => window !== main)
+    if (!browser) throw new Error('Could not find the smoke browser window')
+    browser.destroy()
+  })
+  let webContentsAfterBrowse = webContentsWithBrowse
+  for (let attempt = 0; attempt < 20 && webContentsAfterBrowse > webContentsBeforeBrowse; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 25))
+    webContentsAfterBrowse = await app.evaluate(({ webContents }) => webContents.getAllWebContents().length)
+  }
+  assert.equal(webContentsAfterBrowse, webContentsBeforeBrowse, 'closing a browser window must destroy both webContents')
+
   await queuePresence([playing])
   const rows = await checkPresence([901, 999])
   assert.equal(rows[0].presence.type, 2)
@@ -104,7 +122,7 @@ require(${JSON.stringify(resolve('out/main/index.js'))});`)
   await mkdir('test-results', { recursive: true })
   await page.screenshot({ path: 'test-results/electron-smoke.png', animations: 'disabled' })
   assert.deepEqual(errors, [])
-  console.log('Electron smoke passed: isolated vault, sections, modal, zoom, theme, lock/unlock, presence IPC, per-viewer errors, and game/server rechecks. No Roblox client launched.')
+  console.log('Electron smoke passed: isolated vault, sections, modal, zoom, theme, lock/unlock, browser cleanup, presence IPC, per-viewer errors, and game/server rechecks. No Roblox client launched.')
 } finally {
   if (app) await app.close()
   await rm(directory, { recursive: true, force: true })

@@ -18,6 +18,7 @@ import {
   KeyRound,
   TimerReset,
   AtSign,
+  Hash,
   Lock,
   LogIn,
   ListPlus,
@@ -506,6 +507,10 @@ function RowMenu({
       {item(<AtSign size={13} strokeWidth={1.75} />, 'Copy username', () => {
         void navigator.clipboard.writeText(account.username)
         toast('ok', 'Username copied')
+      })}
+      {item(<Hash size={13} strokeWidth={1.75} />, 'Copy user ID', () => {
+        void navigator.clipboard.writeText(String(account.userId))
+        toast('ok', 'User ID copied')
       })}
       {account.password &&
         item(<Lock size={13} strokeWidth={1.75} />, 'Copy password (clears in 45s)', () =>
