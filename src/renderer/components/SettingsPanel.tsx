@@ -47,19 +47,6 @@ export default function SettingsPanel() {
             ]}
           />
         </div>
-        <div className="settings-row items-center justify-between py-1">
-          <span className="text-[13px] font-medium">Account order</span>
-          <Segmented
-            value={settings.sortMode}
-            onChange={(sortMode) => void patchSettings({ sortMode })}
-            options={[
-              { value: 'custom', label: 'Manual' },
-              { value: 'name', label: 'Name' },
-              { value: 'status', label: 'Status' },
-              { value: 'recent', label: 'Recent' }
-            ]}
-          />
-        </div>
         <Switch
           checked={settings.anonymize}
           onChange={(anonymize) => void patchSettings({ anonymize })}
@@ -101,34 +88,30 @@ export default function SettingsPanel() {
           checked={settings.isolateProfiles}
           onChange={(isolateProfiles) => void patchSettings({ isolateProfiles })}
           label="Give each account its own client profile"
-          hint="Roblox stores its install id, tracker id and a map of every user id that has signed in here in one shared file. TrapRAM keeps a separate copy per account and swaps it in before launching, so the client looks freshly installed. Skipped while another client is already running."
+          hint="Each account gets its own copy of Roblox's install and tracker IDs, so the client looks freshly installed. Skipped while another client is running."
         />
-        <Switch
-          checked={settings.privacyMode}
-          onChange={(privacyMode) => void patchSettings({ privacyMode })}
-          disabled={!win}
-          label="Wipe RobloxCookies.dat before each launch"
-          hint={win ? 'Windows only, and not enough on its own — keep profile isolation on too' : 'That file does not exist on macOS; profile isolation is what does the work here'}
-        />
-        <Switch
-          checked={settings.killTrayProcesses}
-          onChange={(killTrayProcesses) => void patchSettings({ killTrayProcesses })}
-          disabled={!win}
-          label="Close Roblox instances that linger in the tray"
-          hint={
-            win
-              ? 'Roblox leaves a client running with no game attached, and they pile up. TrapRAM closes those every minute — clients you are actually playing on are left alone.'
-              : 'Windows only — Roblox does not leave tray instances on macOS'
-          }
-        />
+        {win && <>
+          <Switch
+            checked={settings.privacyMode}
+            onChange={(privacyMode) => void patchSettings({ privacyMode })}
+            label="Wipe RobloxCookies.dat before each launch"
+            hint="Not enough on its own — keep profile isolation on too"
+          />
+          <Switch
+            checked={settings.killTrayProcesses}
+            onChange={(killTrayProcesses) => void patchSettings({ killTrayProcesses })}
+            label="Close Roblox instances that linger in the tray"
+            hint="Checks every minute and closes idle clients with no game attached. Clients in a game are left alone."
+          />
+        </>}
         <Switch
           checked={settings.multiInstance}
           onChange={(multiInstance) => void patchSettings({ multiInstance })}
           label="Allow multiple clients at once"
           hint={
             win
-              ? 'Holds the Roblox singleton mutex so a second client can start. Turn it on with every Roblox client closed — a running client owns that lock and will not hand it over. It touches anti-cheat territory, so it is your call.'
-              : 'Launches each client from its own copy-on-write clone of Roblox.app and frees the singleton semaphore. Costs almost no disk, but it touches anti-cheat territory — your call.'
+              ? 'Turn this on with every Roblox client closed. Touches anti-cheat territory — your call.'
+              : 'Runs each client from its own lightweight copy of Roblox.app. Touches anti-cheat territory — your call.'
           }
         />
       </Section>

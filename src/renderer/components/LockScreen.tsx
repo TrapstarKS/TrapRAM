@@ -42,7 +42,9 @@ export default function LockScreen({ status }: { status: VaultStatus }) {
 
   return (
     <main className="grid h-[calc(100%-2.5rem)] overflow-y-auto place-items-center px-6 py-6">
-      <div className="panel rise w-full max-w-[400px] p-6">
+      <div className="w-full max-w-[400px]">
+      <p className="mb-4 text-center text-[13px] text-[var(--color-dim)]"><span className="text-[20px] font-semibold tracking-[-0.03em] text-[var(--color-text)]">TrapRAM</span><br />Your Roblox accounts, encrypted on this device</p>
+      <div className="panel rise w-full p-6">
         <div
           className="mb-4 grid h-11 w-11 place-items-center rounded-[13px]"
           style={{ background: 'var(--color-accent-soft)', color: 'var(--color-accent-text)' }}
@@ -127,6 +129,7 @@ export default function LockScreen({ status }: { status: VaultStatus }) {
             </Button>
           </div>
         )}
+      </div>
       </div>
     </main>
   )

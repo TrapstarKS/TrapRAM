@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Play,
   Search,
-  Bookmark,
   Users2,
   Rocket,
   Link2,
@@ -440,7 +439,7 @@ export default function LaunchPanel() {
             <div>
               <Label htmlFor="launchpanel-job-id" hint="Optional — joins one exact server">Job ID</Label>
               <Input id="launchpanel-job-id"
-                className="num !text-[11.5px]"
+                className="num"
                 placeholder="Leave empty for any server"
                 value={jobId}
                 onChange={(e) => setJobId(e.target.value)}
@@ -526,7 +525,7 @@ export default function LaunchPanel() {
             </Button>
           }
         >
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
             {presets.map((p) => (
               <button
                 key={p.id}
@@ -536,14 +535,14 @@ export default function LaunchPanel() {
                 {p.iconUrl ? (
                   <img src={p.iconUrl} alt="" width={30} height={30} className="avatar h-[30px] w-[30px] rounded-[7px]" />
                 ) : (
-                  <div className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[7px] bg-[var(--color-hover)] text-[var(--color-faint)]">
-                    <Bookmark size={14} strokeWidth={1.75} />
+                  <div aria-hidden className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[7px] bg-[var(--color-accent-soft)] text-[13px] font-semibold text-[var(--color-accent-text)]">
+                    {p.name.trim().slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <span className="min-w-0">
                   <span className="block truncate text-[12.5px] font-semibold">{p.name}</span>
                   <span className="num block truncate text-[11px] text-[var(--color-faint)]">
-                    {p.jobId ? 'Fixed server' : p.gameName || p.placeId}
+                    {[p.gameName && p.gameName !== p.name ? p.gameName : `Place ${p.placeId}`, p.jobId && 'fixed server'].filter(Boolean).join(' · ')}
                   </span>
                 </span>
               </button>
@@ -592,7 +591,7 @@ export default function LaunchPanel() {
         }
       >
         {recentLoading ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
             {Array.from({ length: 8 }, (_, i) => (
               <div key={i} className="flex h-[52px] items-center gap-2.5 rounded-[10px] bg-[var(--color-raised)] p-2">
                 <div className="h-8 w-8 shrink-0 animate-pulse rounded-[8px] bg-[var(--color-hover)]" />
@@ -620,7 +619,7 @@ export default function LaunchPanel() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
             {recentGames.map((game) => {
               const favourite = presets.some((p) => p.placeId === game.placeId)
               const context = [
@@ -638,8 +637,8 @@ export default function LaunchPanel() {
                   {game.iconUrl ? (
                     <img src={game.iconUrl} alt="" width={32} height={32} className="avatar h-8 w-8 shrink-0 rounded-[8px]" />
                   ) : (
-                    <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-hover)] text-[var(--color-faint)]">
-                      <Bookmark size={14} strokeWidth={1.75} />
+                    <div aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-accent-soft)] text-[13px] font-semibold text-[var(--color-accent-text)]">
+                      {game.name.trim().slice(0, 1).toUpperCase()}
                     </div>
                   )}
                   <button

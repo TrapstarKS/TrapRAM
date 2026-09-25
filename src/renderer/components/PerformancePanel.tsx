@@ -213,11 +213,10 @@ export default function PerformancePanel() {
             ? `${procs.length - background} in game${background ? `, ${background} in the tray` : ''} · ${totalMem.toLocaleString()} MB total`
             : 'Nothing running'
         }
-        actions={
+        actions={procs.length ? (
           <div className="flex gap-2">
-            <Button
+            {background > 0 && <Button
               className="!h-[28px] !text-[12px]"
-              disabled={!background}
               title="Close the Roblox instances that sit in the tray with no game running"
               onClick={() =>
                 void run('Closing background clients', () => api.call<number>('system:killBackground')).then(
@@ -227,15 +226,14 @@ export default function PerformancePanel() {
             >
               <Trash size={13} strokeWidth={1.75} />
               Tray
-            </Button>
-            <Button className="!h-[28px] !text-[12px]" onClick={() => void tile()} disabled={!procs.length}>
+            </Button>}
+            <Button className="!h-[28px] !text-[12px]" onClick={() => void tile()}>
               <LayoutGrid size={13} strokeWidth={1.75} />
               Arrange
             </Button>
             <Button
               variant="danger"
               className="!h-[28px] !text-[12px]"
-              disabled={!procs.length}
               onClick={() =>
                 void run('Closing clients', () => api.call<number>('system:killAll')).then(
                   (n) => n !== undefined && toast('ok', `Closed ${n} client${n === 1 ? '' : 's'}`)
@@ -246,7 +244,7 @@ export default function PerformancePanel() {
               Close all
             </Button>
           </div>
-        }
+        ) : undefined}
       >
         {procs.length === 0 ? (
           <Empty

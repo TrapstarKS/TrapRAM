@@ -145,8 +145,14 @@
     scale: 0.96;
   }
   .btn:disabled {
-    opacity: 0.42;
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+  /* A tinted disabled primary reads as clickable; drop the accent entirely. */
+  .btn-primary:disabled {
+    background: var(--color-raised);
+    color: var(--color-dim);
+    box-shadow: inset 0 0 0 1px var(--color-line-strong);
   }
 
   .btn-primary {

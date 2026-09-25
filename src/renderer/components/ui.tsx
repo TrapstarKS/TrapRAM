@@ -212,16 +212,16 @@ export function Empty({ icon, title, hint, action }: { icon: ReactNode; title: s
   )
 }
 
-export function Section({ title, hint, children, actions }: { title: string; hint?: string; children: ReactNode; actions?: ReactNode }) {
+export function Section({ title, hint, children, actions }: { title?: string; hint?: string; children: ReactNode; actions?: ReactNode }) {
   return (
     <section className="content-section mb-8">
-      <div className="section-heading mb-4 flex flex-wrap items-center justify-between gap-3">
+      {title || hint || actions ? <div className="section-heading mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{title}</h2>
+          {title ? <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{title}</h2> : null}
           {hint ? <p className="text-[12px] text-[var(--color-faint)]">{hint}</p> : null}
         </div>
         {actions}
-      </div>
+      </div> : null}
       {children}
     </section>
   )

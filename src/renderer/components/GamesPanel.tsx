@@ -217,8 +217,8 @@ export default function GamesPanel() {
                     loading="lazy"
                   />
                 ) : (
-                  <div className="avatar grid aspect-square w-full place-items-center rounded-[12px] text-[var(--color-faint)]">
-                    <Gamepad2 size={22} strokeWidth={1.5} />
+                  <div aria-hidden className="avatar grid aspect-square w-full place-items-center rounded-[12px] bg-[var(--color-accent-soft)] text-[32px] font-semibold text-[var(--color-accent-text)]">
+                    {g.name.trim().slice(0, 1).toUpperCase() || <Gamepad2 size={22} strokeWidth={1.5} />}
                   </div>
                 )}
 

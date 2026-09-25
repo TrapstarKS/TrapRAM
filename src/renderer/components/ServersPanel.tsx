@@ -78,7 +78,7 @@ export default function ServersPanel() {
 
   return (
     <div className="p-5">
-      <Section title="Server browser" hint="Pick an exact server and send every selected account into it">
+      <Section>
         <div className="flex items-end gap-2">
           <div className="flex-1">
             <Label htmlFor="serverspanel-place-id">Experience link or Place ID</Label>

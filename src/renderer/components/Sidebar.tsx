@@ -175,7 +175,7 @@ export default function Sidebar() {
                     <span className="truncate text-[13px] font-semibold" title={anonymize ? `Account ${i + 1}` : a.alias || a.username}>
                       {anonymize ? `Account ${i + 1}` : a.alias || a.username}
                     </span>
-                    {a.pinned && <Pin size={10} strokeWidth={2.25} className="shrink-0 text-[var(--color-faint)]" />}
+                    {a.pinned && <span title="Pinned to top" className="shrink-0 text-[var(--color-dim)]"><Pin size={12} strokeWidth={2} aria-label="Pinned" /></span>}
                     {a.cookieExpired && (
                       <span title="Session expired — sign in again">
                         <KeyRound size={11} strokeWidth={2.25} style={{ color: 'var(--color-warn)' }} />
@@ -187,11 +187,7 @@ export default function Sidebar() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 text-[11px] text-[var(--color-faint)]">
-                    <span
-                      className="h-[6px] w-[6px] shrink-0 rounded-full"
-                      style={{ background: presenceColor(a.presence.type) }}
-                    />
+                  <div className="flex items-center gap-1.5 text-[11px]" style={{ color: a.cookieExpired || !withCookie.includes(a.userId) ? 'var(--color-warn)' : 'var(--color-faint)' }}>
                     <span className="truncate">
                       {a.cookieExpired ? 'Session expired' : !withCookie.includes(a.userId) ? 'Sign-in needed' : a.presence.type === 2 && a.presence.lastLocation
                         ? a.presence.lastLocation
@@ -313,8 +309,9 @@ function Avatar({
   hasCookie: boolean
 }) {
   const initials = anonymize ? String(index + 1) : (account.alias || account.username).slice(0, 2).toUpperCase()
+  // One indicator per row: the badge shows presence; session problems are spelled out in the status text.
   const bad = account.cookieExpired || !hasCookie
-  const label = bad ? (hasCookie ? 'Session expired' : 'No stored session') : 'Session valid'
+  const label = presenceLabel(account.presence.type)
 
   return (
     <div className="relative shrink-0">
@@ -332,16 +329,16 @@ function Avatar({
           {initials}
         </div>
       )}
-      <span
+      {!bad && <span
         role="img"
         aria-label={label}
         title={label}
         className="absolute -bottom-px -end-px h-[10px] w-[10px] rounded-full"
         style={{
-          background: bad ? 'var(--color-bad)' : 'var(--color-info)',
+          background: presenceColor(account.presence.type),
           boxShadow: '0 0 0 2px var(--color-surface)'
         }}
-      />
+      />}
     </div>
   )
 }

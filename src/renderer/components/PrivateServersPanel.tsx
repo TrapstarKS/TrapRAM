@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Shield, Plus, Trash2, Play, Pencil, Copy } from 'lucide-react'
+import { Shield, Plus, Trash2, Play, Pencil, Copy, Users } from 'lucide-react'
 import type { PrivateServer } from '@shared/types'
 import { useStore, readyAccounts } from '../store'
 import { api } from '../lib/api'
@@ -7,7 +7,7 @@ import { Button, Input, Label, Empty, Section, Modal } from './ui'
 
 export default function PrivateServersPanel() {
   const store = useStore()
-  const { servers, accounts, withCookie, run, toast, launch: runLaunch, launching } = store
+  const { servers, presets, accounts, withCookie, run, toast, launch: runLaunch, launching } = store
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [link, setLink] = useState('')
@@ -88,7 +88,6 @@ export default function PrivateServersPanel() {
   return (
     <div className="p-5">
       <Section
-        title="Private servers"
         hint="Share links resolved once and saved — no browser needed to rejoin"
         actions={
           <Button variant="primary" className="!h-[28px] !text-[12px]" onClick={() => setOpen(true)}>
@@ -106,6 +105,7 @@ export default function PrivateServersPanel() {
           />
         ) : (
           <div className="grid gap-1.5">
+            {!usable.length && <div className="selection-notice"><Users size={15} /><span>Select an account with a saved session to join a private server.</span></div>}
             {servers.map((s) => (
               <div key={s.id} className="private-server-row flex flex-wrap items-center gap-3 rounded-[10px] bg-[var(--color-raised)] p-3">
                 {s.iconUrl ? (
@@ -118,8 +118,7 @@ export default function PrivateServersPanel() {
                 <div className="min-w-0 flex-1">
                   <div title={s.name} className="truncate text-[13px] font-semibold">{s.name}</div>
                   <div className="num truncate text-[11.5px] text-[var(--color-faint)]">
-                    {s.gameName ? `${s.gameName} · ` : ''}
-                    {s.placeId}
+                    {s.gameName ?? presets.find(p => p.placeId === s.placeId)?.name ?? `Place ${s.placeId}`}
                   </div>
                 </div>
                 <Button className="!h-[28px] !text-[12px]" onClick={() => void join(s)} disabled={!usable.length || launching}>

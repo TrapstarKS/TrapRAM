@@ -114,8 +114,7 @@ export default function App() {
           </nav>
           <div className="main-scroll min-h-0 flex-1 overflow-y-auto">
             <div className="page-heading">
-              <p className="text-[12px] font-medium text-[var(--color-faint)]">Roblox workspace</p>
-              <h1 className="mt-1 text-[26px] font-semibold tracking-[-0.035em]">{tab === 'launch' ? 'Ready when you are.' : TABS.find(t => t.id === tab)?.label}</h1>
+              <h1 className="text-[26px] font-semibold tracking-[-0.035em]">{tab === 'launch' ? 'Ready when you are.' : TABS.find(t => t.id === tab)?.label}</h1>
               <p className="mt-1 text-[13px] text-[var(--color-dim)]">{{ launch: 'Choose your accounts, pick an experience, and jump in.', games: 'Find your next experience. Keep favourites a click away.', servers: 'Find a public server for your selected accounts.', private: 'Keep your private servers together and rejoin with ease.', performance: 'See what is running and manage your Roblox clients.', settings: 'Make this workspace work for you.' }[tab]}</p>
             </div>
             {tab === 'launch' && <LaunchPanel />}
